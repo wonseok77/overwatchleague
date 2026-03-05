@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/wonseok/Desktop/ow-league/frontend && ./node_modules/.bin/tsc --noEmit 2>&1 | head -80)",
+      "Bash(python3 -m pip install \"bcrypt<4.1\" 2>&1 | tail -5)",
+      "Bash(cd /Users/wonseok/Desktop/ow-league/frontend && cat node_modules/react-dropzone/typings/react-dropzone.d.ts 2>/dev/null | head -80 || npm ls react-dropzone 2>/dev/null)",
+      "Skill(verify)",
+      "Skill(review)",
+      "Skill(docs)"
+    ]
+  }
+}

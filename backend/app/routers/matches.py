@@ -1,0 +1,476 @@
+import json
+import os
+import uuid
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.community import Community
+from app.models.season import Season
+from app.models.match import Match, MatchParticipant, PlayerMatchStat
+from app.models.user import User, PlayerProfile
+from app.schemas.match import MatchCreate, MatchResponse, ParticipantResponse
+from app.services.auth import get_current_user, require_admin
+from app.services.balancing import auto_balance_teams, calculate_mmr_change, compute_player_score
+from app.services.discord import send_match_scheduled, send_match_result
+
+router = APIRouter()
+
+MAX_PARTICIPANTS = 10
+
+
+class TeamAdjustment(BaseModel):
+    team_a_user_ids: List[str]
+    team_b_user_ids: List[str]
+
+
+class MatchResult(BaseModel):
+    map_name: Optional[str] = None
+    team_a_score: int
+    team_b_score: int
+    result: str  # team_a, team_b, draw
+
+
+def _match_response(m: Match) -> MatchResponse:
+    return MatchResponse(
+        id=str(m.id),
+        community_id=str(m.community_id),
+        season_id=str(m.season_id),
+        title=m.title,
+        scheduled_at=m.scheduled_at.isoformat() if m.scheduled_at else None,
+        status=m.status,
+        map_name=m.map_name,
+        team_a_score=m.team_a_score,
+        team_b_score=m.team_b_score,
+        result=m.result,
+    )
+
+
+def _participant_response(p: MatchParticipant) -> ParticipantResponse:
+    return ParticipantResponse(
+        id=str(p.id),
+        match_id=str(p.match_id),
+        user_id=str(p.user_id),
+        status=p.status,
+        team=p.team,
+    )
+
+
+@router.get("/seasons/{season_id}/matches", response_model=List[MatchResponse])
+def list_matches(season_id: uuid.UUID, db: Session = Depends(get_db)):
+    matches = db.query(Match).filter(Match.season_id == season_id).order_by(Match.scheduled_at).all()
+    return [_match_response(m) for m in matches]
+
+
+@router.get("/matches/{match_id}")
+def get_match_detail(match_id: uuid.UUID, db: Session = Depends(get_db)):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    participants_data = []
+    for p in match.participants:
+        user = db.query(User).filter(User.id == p.user_id).first()
+        profile = db.query(PlayerProfile).filter(PlayerProfile.user_id == p.user_id).first()
+        stat = next((s for s in match.stats if s.user_id == p.user_id), None)
+        participants_data.append({
+            "id": str(p.id),
+            "user_id": str(p.user_id),
+            "nickname": user.nickname if user else "",
+            "status": p.status,
+            "team": p.team,
+            "main_role": profile.main_role if profile else None,
+            "current_rank": profile.current_rank if profile else None,
+            "mmr": profile.mmr if profile else None,
+            "heroes_played": stat.heroes_played if stat else None,
+            "screenshot_path": stat.screenshot_path if stat else None,
+            "mmr_before": stat.mmr_before if stat else None,
+            "mmr_after": stat.mmr_after if stat else None,
+            "mmr_change": stat.mmr_change if stat else None,
+        })
+
+    highlights_data = [
+        {
+            "id": str(h.id),
+            "title": h.title,
+            "youtube_url": h.youtube_url,
+            "user_id": str(h.user_id) if h.user_id else None,
+            "registered_at": h.registered_at.isoformat(),
+        }
+        for h in match.highlights
+    ]
+
+    return {
+        **_match_response(match).model_dump(),
+        "participants": participants_data,
+        "highlights": highlights_data,
+    }
+
+
+@router.post("/seasons/{season_id}/matches", response_model=MatchResponse, status_code=status.HTTP_201_CREATED)
+def create_match(
+    season_id: uuid.UUID,
+    req: MatchCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    season = db.query(Season).filter(Season.id == season_id).first()
+    if not season:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+
+    match = Match(
+        community_id=season.community_id,
+        season_id=season_id,
+        title=req.title,
+        scheduled_at=datetime.fromisoformat(req.scheduled_at),
+    )
+    db.add(match)
+    db.commit()
+    db.refresh(match)
+
+    community = db.query(Community).filter(Community.id == season.community_id).first()
+    if community and community.discord_webhook_url:
+        background_tasks.add_task(
+            send_match_scheduled,
+            community.discord_webhook_url,
+            match.title,
+            match.scheduled_at.isoformat() if match.scheduled_at else "",
+            community.name,
+        )
+
+    return _match_response(match)
+
+
+@router.post("/matches/{match_id}/register", response_model=ParticipantResponse, status_code=status.HTTP_201_CREATED)
+def register_for_match(
+    match_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+    if match.status != "open":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Match registration is not open")
+
+    existing = (
+        db.query(MatchParticipant)
+        .filter(
+            MatchParticipant.match_id == match_id,
+            MatchParticipant.user_id == current_user.id,
+            MatchParticipant.status.in_(["registered", "waitlist"]),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already registered")
+
+    registered_count = (
+        db.query(MatchParticipant)
+        .filter(MatchParticipant.match_id == match_id, MatchParticipant.status == "registered")
+        .count()
+    )
+
+    participant_status = "registered" if registered_count < MAX_PARTICIPANTS else "waitlist"
+
+    participant = MatchParticipant(
+        match_id=match_id,
+        user_id=current_user.id,
+        status=participant_status,
+    )
+    db.add(participant)
+    db.commit()
+    db.refresh(participant)
+    return _participant_response(participant)
+
+
+@router.delete("/matches/{match_id}/register", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_registration(
+    match_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    participant = (
+        db.query(MatchParticipant)
+        .filter(
+            MatchParticipant.match_id == match_id,
+            MatchParticipant.user_id == current_user.id,
+            MatchParticipant.status.in_(["registered", "waitlist"]),
+        )
+        .first()
+    )
+    if not participant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+
+    was_registered = participant.status == "registered"
+    participant.status = "cancelled"
+
+    if was_registered:
+        next_waitlist = (
+            db.query(MatchParticipant)
+            .filter(MatchParticipant.match_id == match_id, MatchParticipant.status == "waitlist")
+            .order_by(MatchParticipant.registered_at)
+            .first()
+        )
+        if next_waitlist:
+            next_waitlist.status = "registered"
+
+    db.commit()
+
+
+@router.post("/matches/{match_id}/close-registration")
+def close_registration(
+    match_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+    if match.status != "open":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Match is not open")
+
+    match.status = "closed"
+
+    participants = (
+        db.query(MatchParticipant)
+        .filter(MatchParticipant.match_id == match_id, MatchParticipant.status == "registered")
+        .all()
+    )
+
+    player_data = []
+    for p in participants:
+        profile = db.query(PlayerProfile).filter(PlayerProfile.user_id == p.user_id).first()
+        user = db.query(User).filter(User.id == p.user_id).first()
+        player_data.append({
+            "user_id": str(p.user_id),
+            "participant_id": str(p.id),
+            "main_role": profile.main_role if profile else "dps",
+            "current_rank": profile.current_rank if profile else None,
+            "mmr": profile.mmr if profile else 1000,
+            "nickname": user.nickname if user else "",
+        })
+
+    balance_result = None
+    if len(player_data) >= 2:
+        balance_result = auto_balance_teams(player_data)
+
+        team_a_ids = {p["user_id"] for p in balance_result["team_a"]}
+        for p in participants:
+            if str(p.user_id) in team_a_ids:
+                p.team = "A"
+            else:
+                p.team = "B"
+
+    db.commit()
+    db.refresh(match)
+
+    response = _match_response(match)
+    if balance_result:
+        return {
+            **response.model_dump(),
+            "balance_result": balance_result["balance_reason"],
+        }
+    return response
+
+
+@router.put("/matches/{match_id}/teams", response_model=List[ParticipantResponse])
+def adjust_teams(
+    match_id: uuid.UUID,
+    req: TeamAdjustment,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    for uid_str in req.team_a_user_ids:
+        uid = uuid.UUID(uid_str)
+        p = db.query(MatchParticipant).filter(
+            MatchParticipant.match_id == match_id, MatchParticipant.user_id == uid
+        ).first()
+        if p:
+            p.team = "A"
+
+    for uid_str in req.team_b_user_ids:
+        uid = uuid.UUID(uid_str)
+        p = db.query(MatchParticipant).filter(
+            MatchParticipant.match_id == match_id, MatchParticipant.user_id == uid
+        ).first()
+        if p:
+            p.team = "B"
+
+    db.commit()
+
+    all_participants = db.query(MatchParticipant).filter(
+        MatchParticipant.match_id == match_id,
+        MatchParticipant.status == "registered",
+    ).all()
+    return [_participant_response(p) for p in all_participants]
+
+
+@router.post("/matches/{match_id}/result", response_model=MatchResponse)
+def submit_result(
+    match_id: uuid.UUID,
+    req: MatchResult,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    match.map_name = req.map_name
+    match.team_a_score = req.team_a_score
+    match.team_b_score = req.team_b_score
+    match.result = req.result
+    match.status = "completed"
+
+    participants = (
+        db.query(MatchParticipant)
+        .filter(MatchParticipant.match_id == match_id, MatchParticipant.status == "registered")
+        .all()
+    )
+
+    team_a_score_total = 0.0
+    team_b_score_total = 0.0
+    team_a_participants = []
+    team_b_participants = []
+
+    for p in participants:
+        profile = db.query(PlayerProfile).filter(PlayerProfile.user_id == p.user_id).first()
+        player_score = compute_player_score(
+            profile.current_rank if profile else None,
+            profile.mmr if profile else 1000,
+        )
+        if p.team == "A":
+            team_a_score_total += player_score
+            team_a_participants.append((p, profile))
+        elif p.team == "B":
+            team_b_score_total += player_score
+            team_b_participants.append((p, profile))
+
+    if req.result != "draw":
+        for p, profile in team_a_participants:
+            if not profile:
+                continue
+            is_winner = req.result == "team_a"
+            mmr_before = profile.mmr
+            change = calculate_mmr_change(is_winner, team_a_score_total, team_b_score_total)
+            profile.mmr = max(0, profile.mmr + change)
+
+            stat = PlayerMatchStat(
+                match_id=match_id,
+                user_id=p.user_id,
+                mmr_before=mmr_before,
+                mmr_after=profile.mmr,
+                mmr_change=change,
+            )
+            db.add(stat)
+
+        for p, profile in team_b_participants:
+            if not profile:
+                continue
+            is_winner = req.result == "team_b"
+            mmr_before = profile.mmr
+            change = calculate_mmr_change(is_winner, team_b_score_total, team_a_score_total)
+            profile.mmr = max(0, profile.mmr + change)
+
+            stat = PlayerMatchStat(
+                match_id=match_id,
+                user_id=p.user_id,
+                mmr_before=mmr_before,
+                mmr_after=profile.mmr,
+                mmr_change=change,
+            )
+            db.add(stat)
+
+    db.commit()
+    db.refresh(match)
+
+    community = db.query(Community).filter(Community.id == match.community_id).first()
+    if community and community.discord_webhook_url:
+        winner_label = "Team A" if req.result == "team_a" else ("Team B" if req.result == "team_b" else "Draw")
+        background_tasks.add_task(
+            send_match_result,
+            community.discord_webhook_url,
+            match.title,
+            winner_label,
+            match.map_name or "N/A",
+        )
+
+    return _match_response(match)
+
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads", "screenshots")
+
+
+@router.post("/matches/{match_id}/stats/{user_id}")
+def upload_player_stat(
+    match_id: uuid.UUID,
+    user_id: uuid.UUID,
+    heroes_played: Optional[str] = Form(None),
+    screenshot: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    heroes_list = None
+    if heroes_played:
+        heroes_list = json.loads(heroes_played)
+
+    screenshot_path = None
+    if screenshot:
+        match_dir = os.path.join(UPLOAD_DIR, str(match_id))
+        os.makedirs(match_dir, exist_ok=True)
+        ext = os.path.splitext(screenshot.filename)[1] if screenshot.filename else ".png"
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        filename = f"{user_id}_{timestamp}{ext}"
+        filepath = os.path.join(match_dir, filename)
+        with open(filepath, "wb") as f:
+            f.write(screenshot.file.read())
+        screenshot_path = f"/uploads/screenshots/{match_id}/{filename}"
+
+    stat = (
+        db.query(PlayerMatchStat)
+        .filter(PlayerMatchStat.match_id == match_id, PlayerMatchStat.user_id == user_id)
+        .first()
+    )
+
+    if stat:
+        if heroes_list is not None:
+            stat.heroes_played = heroes_list
+        if screenshot_path:
+            stat.screenshot_path = screenshot_path
+    else:
+        stat = PlayerMatchStat(
+            match_id=match_id,
+            user_id=user_id,
+            heroes_played=heroes_list,
+            screenshot_path=screenshot_path,
+        )
+        db.add(stat)
+
+    db.commit()
+    db.refresh(stat)
+
+    return {
+        "id": str(stat.id),
+        "match_id": str(stat.match_id),
+        "user_id": str(stat.user_id),
+        "heroes_played": stat.heroes_played,
+        "screenshot_path": stat.screenshot_path,
+    }
