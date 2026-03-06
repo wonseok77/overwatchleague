@@ -1,83 +1,30 @@
-# OW League - Team Progress
-# Last updated: 2026-03-05
+## Batch 4 Context (2026-03-06)
 
-## Architecture Decisions
-- Monorepo: frontend/ + backend/ in single repo
-- DB: PostgreSQL 16 via Docker
-- Auth: JWT (HS256, 7-day expiry)
-- API proxy: Vite dev server proxies /api to backend:8000
-- File uploads: local filesystem at /uploads/screenshots/{match_id}/
+### Critical DB Issue
+- heroes table in migration 000: columns (id, name, role, image_url, key)
+- Hero model expects: (id, name, role, portrait_url, is_custom, created_at)
+- MISMATCH: image_url vs portrait_url, missing is_custom/created_at
+- Need migration 005 to fix this
 
-## Completed
-- [x] S1: Project scaffolding (pichai) - all files created, docker-compose valid
-- [x] S2: DB schema + FastAPI models (jensen) - 9 SQLAlchemy models, alembic env configured
-- [x] S3: Auth API (jensen) - register/login/me endpoints, JWT HS256, bcrypt hashing
-- [x] S4: Community + Members API (jensen) - CRUD for communities and members with player profiles
-- [x] S5: Season + Match + Registration API (jensen) - seasons, matches, participant registration with waitlist
-- [x] S6: Team Balancing + Discord Webhook (jensen) - auto_balance_teams algorithm, MMR calculation, result submission
-- [x] S7: Design system (tim-cook) - 13 UI components, 7 domain components, Tailwind tokens, global styles
-- [x] S8: Frontend routing + API client (zuckerberg) - React Router v6, AuthContext, axios client, 5 API modules, 9 page stubs
-- [x] S9: Auth pages + Layout (zuckerberg) - LoginPage, RegisterPage forms, Navbar with auth state, mobile hamburger menu
-- [x] S10: Main + Match list UI (zuckerberg) - MainPage (next match, top 5, recent results), MatchListPage (CRUD, register/cancel)
-- [x] S11: Team composition + Leaderboard UI (zuckerberg) - TeamCompositionPage (dnd-kit, balance viz), LeaderboardPage (table, role filter)
+### Issues to Fix
+1. Hero add fails — DB schema mismatch (see above)
+2. Profile: show season-specific position tiers (currently only global ranks)
+3. MatchListPage: calendar with season periods colored, sessions grouped by season
+4. SessionDetailPage: verify edit dialog + matchmaking work after latest rebuild
 
-- [x] S12: Phase 2 UI 컴포넌트 (tim-cook) - 7 domain components: ScreenshotDropzone, YouTubeEmbed, StatCard, MatchHistoryRow, HighlightCard, SeasonStatRow, MatchResultForm
-- [x] S13: Phase 2 Backend API (jensen) - screenshot upload, user profile aggregation, highlights CRUD, static file serving
+### Codebase Patterns
+- FastAPI + SQLAlchemy 2.0 + PostgreSQL backend
+- React 18 + Vite + TypeScript + Tailwind frontend
+- Docker Compose: frontend:3000 + backend:8000 + PostgreSQL:5432
+- Alembic migrations: 000 → 001 → 002 → 003 → 004
+- Custom Dialog (NOT shadcn): open prop, onClose callback, fixed overlay z-50
+- Auth: JWT, role-based (admin/manager/member)
+- 장원석 = admin user (real_name)
+- Tier-MMR: Champion=4500, GM=4000, Master=3500, Diamond=3000, Plat=2500, Gold=2000, Silver=1500, Bronze=1000
+- Python 3.9: use Optional[str] not str | None
+- hero_role enum in DB (from migration 000) — different from player_role enum
 
-- [x] S14: MatchDetailPage 구현 (zuckerberg) - match detail with teams, result form, highlights
-- [x] S15: ProfilePage 구현 (zuckerberg) - user profile with stats, season records, match history, highlights
-- [x] S16: HighlightsPage 구현 (zuckerberg) - community highlights grid, admin CRUD, player filter, route + navbar
-
-- [x] S17: Phase 2 테스트 (bezos) - backend 75 passed (20 new), frontend 25 passed (14 new), build OK
-
-- [x] S18: 영웅 DB + HeroSelect 드롭다운 (hero model, heroes router, HeroSelect.tsx, AdminPage 영웅 관리)
-- [x] S19: RegisterPage HeroSelect 연동 + 로그인/회원가입 상단 로고 (main_heroes API 연결, 내전 플랫폼 로고)
-
-- [x] S20: Phase 3 삭제 분석 (bezos) - 기존 코드 모두 활용 가능, SeasonStat 모델 존재, discord.py 확장 필요
-- [x] S21: Phase 3 API 계약 (pichai) - /admin prefix 라우터, require_admin, community_id 자동 스코핑, 마이그레이션 불필요
-- [x] S22: 백엔드 Admin API (jensen) - backend/app/routers/admin.py 신규, 시즌/멤버/Webhook 8개 엔드포인트
-- [x] S23: 시즌 집계 (jensen) - POST /admin/seasons/{id}/finalize, wins/losses/win_rate/rank_position SeasonStat upsert
-- [x] S24: Discord Webhook 알림 (jensen) - send_match_scheduled + send_match_result, BackgroundTasks 비동기 호출
-- [x] S25: AdminPage 탭 UI (zuckerberg) - 탭 4개(영웅/시즌/멤버/Webhook), frontend/src/api/admin.ts 신규
-- [x] S26: Phase 3 통합 테스트 (bezos) - pytest 104p/2s, vitest 33p, build OK
-
-- [x] S27: HF1 현황 파악 (bezos) - avatar_url 없음, 달력 없음, EmptyState 없음
-- [x] S28: HF1 백엔드 아바타 API (jensen) - User.avatar_url 추가, POST /users/{id}/avatar, alembic migration
-- [x] S29: HF1 디자인 개선 (tim-cook) - Avatar src prop, EmptyState 신규, Navbar/MainPage/LeaderboardPage UI 개선
-- [x] S30: HF1 프론트엔드 개선 (zuckerberg) - ProfilePage 아바타 업로드, RegisterPage 아바타 선택, MatchListPage 달력 뷰
-- [x] S31: HF1 통합 테스트 (bezos) - pytest 110p/2s, tsc OK, build OK, auth.py main_heroes 버그 수정
-
-## Gotchas (Phase 3 추가)
-- admin.py 라우터: require_admin 의존성 + admin.community_id 자동 스코핑 (URL에 community_id 불필요)
-- Discord BackgroundTasks: discord.py가 sync인데 FastAPI sync 라우터에서 호출 → BackgroundTasks로 비동기화
-- finalize 멱등성: SeasonStat 기존 레코드 삭제 후 재생성 패턴
-- AdminPage Tabs: useState<'heroes'|'seasons'|'members'|'webhook'> 탭 상태 관리
-
-## In Progress
-
-## Gotchas (Hotfix 1 추가)
-- auth.py main_heroes: `req.main_heroes or []` → SQLite에서 빈 list 바인딩 에러 → `if req.main_heroes else None`으로 수정
-- Avatar 컴포넌트: ui/avatar.tsx(이니셜만) vs components/Avatar.tsx(src+이미지 지원) 분리
-- 아바타 업로드: POST /users/{id}/avatar, 권한은 본인 or admin, JPG/PNG/WebP, 5MB 제한
-- MatchListPage 달력: 커스텀 달력 뷰 + 리스트 뷰 토글
-
-## Gotchas
-- react-dropzone FileRejection 타입: `import { type FileRejection } from 'react-dropzone'` 사용
-- npm run build = tsc && vite build: noUnusedLocals strict 설정 영향 (테스트 파일 미사용 선언도 빌드 실패)
-- SQLAlchemy relationship 필수: Match.participants/stats/highlights selectin으로 N+1 방지
-- RankBadge에 세부티어 포함 rank 전달 시 `rank.split(' ')[0]`으로 기본 티어 추출 필요
-- RANKS 목록: BASE_RANKS.flatMap(r => [5,4,3,2,1].map(n => `${r} ${n}`)) 패턴 (5=낮음, 1=높음)
-- Dockerfile: backend=python:3.9-slim, frontend=multistage(node:20→nginx:alpine), nginx.conf에 SPA fallback 필요
-- HeroSelect: 네이티브 <select>는 이미지 불가 → 커스텀 드롭다운(useRef + mousedown 이벤트)
-- RegisterPage HeroSelect: useEffect로 getHeroes() 로드 후 HeroSelect에 전달, submit 시 [hero1,hero2,hero3].filter(Boolean)으로 main_heroes 배열 생성
-- 로그인/회원가입 상단 로고: `relative` 컨테이너 + `absolute left-4 top-4`에 Link+Swords 아이콘 배치
-- 영웅 시드: POST /heroes/seed (관리자 전용, 멱등성 보장, 최초 1회 실행)
-- Blizzard CDN: https://d15f34w2p8l1cc.cloudfront.net/overwatch/{key}.png (URL 유효성 확인 필요)
-
-## Blocked
-
-## Notes
-- Design system: cn() utility at src/lib/utils.ts, all UI components in src/components/ui/
-- Role colors: Tank=#4FC1E9, DPS=#F87171, Support=#4ADE80
-- Brand primary: ow-orange-500 (#F99E1A), white-based theme
-- Component guide: frontend/src/components/DESIGN_GUIDE.md
+### File Boundaries
+- Backend agent: backend/ only
+- Frontend agent: frontend/src/ only
+- Shared types: frontend/src/types/index.ts

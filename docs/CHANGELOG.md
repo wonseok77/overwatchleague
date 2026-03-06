@@ -1,19 +1,62 @@
 # CHANGELOG
 
-## [Unreleased] — Phase 5 예정
+## [Unreleased]
 
-### Added
+### Planned
+- Claude Vision OCR 추가 (Tesseract fallback 이미 구현)
+- 멀티 커뮤니티 온보딩 플로우
+- Discord OAuth 선택적 연동
+
+---
+
+## [Phase 5c] — 2026-03-06
+
+### Added (Backend)
+- `backend/app/services/ocr.py` — Tesseract OCR 스코어보드 스탯 추출 (이미지 전처리 + 정규식 파싱)
+- `POST /matches/{match_id}/stats/{user_id}/ocr` — OCR 자동 추출 엔드포인트
+- `backend/tests/test_ocr.py` — OCR 테스트 6개
+- `discord.py`: `send_matchmaking_confirmed()` — 매치메이킹 확정 시 Discord 알림
+- `pytesseract==0.3.10`, `Pillow==10.2.0` 의존성
+
+### Changed (Backend)
+- `sessions.py`: confirm_matchmaking에 BackgroundTasks Discord 알림 추가
+
+### Added (Frontend)
+- `matches.ts`: `triggerOcr()` 함수
+- `MatchDetailPage.tsx`: admin OCR 추출 버튼 (스크린샷 업로드된 플레이어)
+
+---
+
+## [Phase 5b] — 2026-03-06
+
+### Added (Frontend)
+- `frontend/src/api/sessions.ts` — 세션 CRUD + 신청 + 매치메이킹 API 클라이언트
+- `frontend/src/api/ranks.ts` — 포지션별 랭크 API 클라이언트
+- `frontend/src/pages/SessionDetailPage.tsx` — 세션 상세 + 참가 신청 + 매치메이킹 미리보기
+- `frontend/src/types/index.ts` — MatchSession, SessionRegistration, MatchmakingResult, PositionRank 타입
+
+### Changed (Frontend)
+- `MatchListPage.tsx` — '내전 생성' 탭으로 리디자인 (2-column: 달력 + 세션 패널)
+- `ProfilePage.tsx` — 포지션별 티어 설정 UI (탱커/딜러/서포터 + 편집/저장)
+- `Navbar.tsx` — '내전 일정' → '내전 생성' 텍스트 변경
+- `App.tsx` — `/sessions/:id` 라우트 추가
+
+---
+
+## [Phase 5a] — 2026-03-06
+
+### Added (Backend)
 - `match_sessions` 모델 (하루 단위 내전 세션)
 - `session_registrations` 모델 (1/2/3지망 포지션 + min/max_games)
 - `matchmaking_results` 모델 (미리보기 스냅샷)
-- `ocr_configs` 모델 (Claude Vision / Tesseract 설정)
 - `player_position_ranks` 모델 (포지션별·시즌별 티어)
 - `player_match_stats` 확장: kills/deaths/assists/damage_dealt/healing_done
 - `player_profiles.win_rate` 컬럼
 - 세션 CRUD API, 세션 신청 API
 - 매치메이킹 실행/미리보기/확정 API
-- OCR 스탯 추출 API (Claude Vision → Tesseract fallback)
-- 포지션별 랭크 설정 API + ProfilePage UI
+- 포지션별 랭크 설정 API
+- 3단계 매치메이킹 알고리즘 (균등분배 → 포지션배정 → 4가중치밸런싱)
+- `compute_player_score` 4가중치 확장 (rank/mmr/win_rate/stat_score)
 
 ---
 

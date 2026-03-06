@@ -12,15 +12,24 @@ from app.database import get_db
 from app.models.community import Community
 from app.models.season import Season
 from app.models.match import Match, MatchParticipant, PlayerMatchStat
-from app.models.user import User, PlayerProfile
+from app.models.user import User, PlayerProfile, PlayerPositionRank
 from app.schemas.match import MatchCreate, MatchResponse, ParticipantResponse
-from app.services.auth import get_current_user, require_admin
+from app.services.auth import get_current_user, require_admin, require_manager_or_admin
 from app.services.balancing import auto_balance_teams, calculate_mmr_change, compute_player_score
+from app.services.mmr import calculate_mmr_change as calc_pos_mmr_change
 from app.services.discord import send_match_scheduled, send_match_result
+from app.services.ocr import extract_stats_from_image
 
 router = APIRouter()
 
 MAX_PARTICIPANTS = 10
+
+
+VALID_STATUSES = {"open", "closed", "in_progress", "completed"}
+
+
+class MatchStatusUpdate(BaseModel):
+    status: str
 
 
 class TeamAdjustment(BaseModel):
@@ -117,7 +126,7 @@ def create_match(
     req: MatchCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     season = db.query(Season).filter(Season.id == season_id).first()
     if not season:
@@ -227,7 +236,7 @@ def cancel_registration(
 def close_registration(
     match_id: uuid.UUID,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     match = db.query(Match).filter(Match.id == match_id).first()
     if not match:
@@ -279,12 +288,33 @@ def close_registration(
     return response
 
 
+@router.patch("/matches/{match_id}/status", response_model=MatchResponse)
+def update_match_status(
+    match_id: uuid.UUID,
+    req: MatchStatusUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_manager_or_admin),
+):
+    if req.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+        )
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+    match.status = req.status
+    db.commit()
+    db.refresh(match)
+    return _match_response(match)
+
+
 @router.put("/matches/{match_id}/teams", response_model=List[ParticipantResponse])
 def adjust_teams(
     match_id: uuid.UUID,
     req: TeamAdjustment,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     match = db.query(Match).filter(Match.id == match_id).first()
     if not match:
@@ -315,13 +345,47 @@ def adjust_teams(
     return [_participant_response(p) for p in all_participants]
 
 
+def _compute_stat_bonus(stat: PlayerMatchStat, position: str) -> float:
+    """스탯 기반 보너스 (-1.0 ~ 1.0)"""
+    score = 0.0
+    count = 0
+
+    if stat.kills is not None and stat.deaths is not None:
+        kd = stat.kills / max(1, stat.deaths)
+        if kd > 2.0:
+            score += 1.0
+        elif kd > 1.0:
+            score += 0.5
+        elif kd < 0.5:
+            score -= 0.5
+        count += 1
+
+    if position in ('dps', 'tank') and stat.damage_dealt is not None:
+        if stat.damage_dealt > 10000:
+            score += 0.5
+        elif stat.damage_dealt > 7000:
+            score += 0.25
+        count += 1
+
+    if position == 'support' and stat.healing_done is not None:
+        if stat.healing_done > 10000:
+            score += 0.5
+        elif stat.healing_done > 7000:
+            score += 0.25
+        count += 1
+
+    if count == 0:
+        return 0.0
+    return max(-1.0, min(1.0, score / count))
+
+
 @router.post("/matches/{match_id}/result", response_model=MatchResponse)
 def submit_result(
     match_id: uuid.UUID,
     req: MatchResult,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     match = db.query(Match).filter(Match.id == match_id).first()
     if not match:
@@ -375,6 +439,31 @@ def submit_result(
             )
             db.add(stat)
 
+            # 포지션별 MMR 업데이트
+            position = p.assigned_position or (profile.main_role if profile else None)
+            if position:
+                pos_rank = (
+                    db.query(PlayerPositionRank)
+                    .filter(
+                        PlayerPositionRank.user_id == p.user_id,
+                        PlayerPositionRank.position == position,
+                        PlayerPositionRank.season_id == None,
+                    )
+                    .first()
+                )
+                if pos_rank and pos_rank.mmr is not None:
+                    existing_stat = (
+                        db.query(PlayerMatchStat)
+                        .filter(
+                            PlayerMatchStat.match_id == match_id,
+                            PlayerMatchStat.user_id == p.user_id,
+                        )
+                        .first()
+                    )
+                    stat_bonus = _compute_stat_bonus(existing_stat, position) if existing_stat else 0.0
+                    pos_change = calc_pos_mmr_change(is_winner, stat_bonus)
+                    pos_rank.mmr = max(0, pos_rank.mmr + pos_change)
+
         for p, profile in team_b_participants:
             if not profile:
                 continue
@@ -391,6 +480,31 @@ def submit_result(
                 mmr_change=change,
             )
             db.add(stat)
+
+            # 포지션별 MMR 업데이트
+            position = p.assigned_position or (profile.main_role if profile else None)
+            if position:
+                pos_rank = (
+                    db.query(PlayerPositionRank)
+                    .filter(
+                        PlayerPositionRank.user_id == p.user_id,
+                        PlayerPositionRank.position == position,
+                        PlayerPositionRank.season_id == None,
+                    )
+                    .first()
+                )
+                if pos_rank and pos_rank.mmr is not None:
+                    existing_stat = (
+                        db.query(PlayerMatchStat)
+                        .filter(
+                            PlayerMatchStat.match_id == match_id,
+                            PlayerMatchStat.user_id == p.user_id,
+                        )
+                        .first()
+                    )
+                    stat_bonus = _compute_stat_bonus(existing_stat, position) if existing_stat else 0.0
+                    pos_change = calc_pos_mmr_change(is_winner, stat_bonus)
+                    pos_rank.mmr = max(0, pos_rank.mmr + pos_change)
 
     db.commit()
     db.refresh(match)
@@ -473,4 +587,55 @@ def upload_player_stat(
         "user_id": str(stat.user_id),
         "heroes_played": stat.heroes_played,
         "screenshot_path": stat.screenshot_path,
+    }
+
+
+@router.post("/matches/{match_id}/stats/{user_id}/ocr")
+def ocr_extract_stats(
+    match_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_manager_or_admin),
+):
+    stat = (
+        db.query(PlayerMatchStat)
+        .filter(PlayerMatchStat.match_id == match_id, PlayerMatchStat.user_id == user_id)
+        .first()
+    )
+    if not stat or not stat.screenshot_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Screenshot not found")
+
+    # screenshot_path is stored as "/uploads/screenshots/..." — resolve to absolute
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    abs_path = os.path.join(base_dir, stat.screenshot_path.lstrip("/"))
+
+    if not os.path.isfile(abs_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Screenshot file not found on disk")
+
+    extracted = extract_stats_from_image(abs_path)
+    if not extracted:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Failed to extract stats from screenshot",
+        )
+
+    for key in ("kills", "deaths", "assists", "damage_dealt", "healing_done"):
+        value = extracted.get(key)
+        if value is not None:
+            setattr(stat, key, value)
+    stat.stat_source = "ocr"
+
+    db.commit()
+    db.refresh(stat)
+
+    return {
+        "id": str(stat.id),
+        "match_id": str(stat.match_id),
+        "user_id": str(stat.user_id),
+        "kills": stat.kills,
+        "deaths": stat.deaths,
+        "assists": stat.assists,
+        "damage_dealt": stat.damage_dealt,
+        "healing_done": stat.healing_done,
+        "stat_source": stat.stat_source,
     }

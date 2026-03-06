@@ -9,16 +9,15 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
 import { getSeasons } from '@/api/seasons'
 import { getMatches } from '@/api/matches'
-import { getLeaderboard } from '@/api/leaderboard'
+import { getLeaderboard, type LeaderboardEntry } from '@/api/leaderboard'
 import type { Match } from '@/types'
-import type { MemberResponse } from '@/api/members'
 import { Trophy, Calendar, TrendingUp, Swords, ArrowRight } from 'lucide-react'
 
 export default function MainPage() {
   const { user } = useAuth()
   const [nextMatch, setNextMatch] = useState<Match | null>(null)
   const [recentMatches, setRecentMatches] = useState<Match[]>([])
-  const [topPlayers, setTopPlayers] = useState<MemberResponse[]>([])
+  const [topPlayers, setTopPlayers] = useState<LeaderboardEntry[]>([])
 
   useEffect(() => {
     if (!user) return

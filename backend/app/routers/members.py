@@ -1,16 +1,93 @@
 import uuid
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models.community import Community
-from app.models.user import User, PlayerProfile
+from app.models.user import User, PlayerProfile, PlayerPositionRank
 from app.schemas.user import MemberCreate, MemberUpdate, MemberResponse
-from app.services.auth import hash_password, require_admin
+from app.services.auth import hash_password, require_admin, get_current_user
 
 router = APIRouter()
+
+
+# --- Leaderboard ---
+
+class LeaderboardPositionRank(BaseModel):
+    position: str
+    rank: str
+    mmr: Optional[int] = None
+
+
+class LeaderboardEntry(BaseModel):
+    id: str
+    nickname: str
+    real_name: str
+    avatar_url: Optional[str] = None
+    main_role: Optional[str] = None
+    main_heroes: Optional[List[str]] = None
+    mmr: Optional[int] = None
+    position_ranks: List[LeaderboardPositionRank] = []
+
+
+@router.get("/{community_id}/leaderboard", response_model=List[LeaderboardEntry])
+def get_leaderboard(
+    community_id: uuid.UUID,
+    season_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    users = (
+        db.query(User)
+        .options(joinedload(User.profile), joinedload(User.position_ranks))
+        .filter(User.community_id == community_id)
+        .all()
+    )
+
+    result = []
+    seen = set()
+    for user in users:
+        if user.id in seen:
+            continue
+        seen.add(user.id)
+
+        if season_id:
+            sid = uuid.UUID(season_id)
+            pos_ranks = [pr for pr in (user.position_ranks or []) if pr.season_id == sid]
+        else:
+            # "전체" 선택: 모든 시즌 랭크 중 포지션별 최고 MMR 선택
+            best_by_pos: dict = {}
+            for pr in (user.position_ranks or []):
+                existing = best_by_pos.get(pr.position)
+                if existing is None or (pr.mmr or 0) > (existing.mmr or 0):
+                    best_by_pos[pr.position] = pr
+            pos_ranks = list(best_by_pos.values())
+
+        profile = user.profile
+        # 가장 높은 포지션 MMR을 대표 MMR로 사용
+        max_mmr = max((pr.mmr for pr in pos_ranks if pr.mmr is not None), default=None)
+        if max_mmr is None and profile:
+            max_mmr = profile.mmr
+
+        result.append(LeaderboardEntry(
+            id=str(user.id),
+            nickname=user.nickname,
+            real_name=user.real_name,
+            avatar_url=user.avatar_url,
+            main_role=profile.main_role if profile else None,
+            main_heroes=profile.main_heroes if profile else None,
+            mmr=max_mmr,
+            position_ranks=[
+                LeaderboardPositionRank(position=pr.position, rank=pr.rank, mmr=pr.mmr)
+                for pr in pos_ranks
+            ],
+        ))
+
+    result.sort(key=lambda x: x.mmr or 0, reverse=True)
+    return result
 
 
 def _build_member_response(user: User) -> MemberResponse:

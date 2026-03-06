@@ -30,9 +30,21 @@ def parse_rank_score(rank_str: Optional[str]) -> float:
     return base_score
 
 
-def compute_player_score(rank_str: Optional[str], mmr: int) -> float:
+def compute_player_score(
+    rank_str: Optional[str],
+    mmr: int,
+    win_rate: float = 0.0,
+    role_stat_score: float = 0.0,
+    weights: Optional[dict] = None,
+) -> float:
+    w = weights or {"rank": 0.3, "mmr": 0.4, "win_rate": 0.2, "stat": 0.1}
     rank_score = parse_rank_score(rank_str)
-    return rank_score * 0.4 + mmr * 0.006
+    return (
+        rank_score * w["rank"]
+        + (mmr / 200.0) * w["mmr"]
+        + win_rate * w["win_rate"]
+        + role_stat_score * w["stat"]
+    )
 
 
 def _team_score(team: List[Dict[str, Any]]) -> float:

@@ -16,6 +16,9 @@ interface RoleBadgeProps {
 
 export function RoleBadge({ role, showIcon = true, className }: RoleBadgeProps) {
   const config = roleConfig[role]
+  if (!config) {
+    return <Badge className={className}>{role ?? 'Unknown'}</Badge>
+  }
   const Icon = config.icon
 
   return (

@@ -9,14 +9,13 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { getSeasons } from '@/api/seasons'
-import { getMatches, createMatch, registerForMatch, cancelRegistration, closeRegistration } from '@/api/matches'
-import type { Match } from '@/types'
-import { Plus, Calendar, List, ChevronLeft, ChevronRight } from 'lucide-react'
+import { getMatches, registerForMatch, cancelRegistration, closeRegistration } from '@/api/matches'
+import { getSessions, createSession } from '@/api/sessions'
+import type { Match, MatchSession, Season, SessionStatus } from '@/types'
+import { Plus, Calendar, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type ViewMode = 'list' | 'calendar'
-
-// 달력 헬퍼
+// --- 달력 헬퍼 ---
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
 }
@@ -26,21 +25,52 @@ function getFirstDayOfMonth(year: number, month: number) {
 }
 
 function isSameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() &&
+  return (
+    a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
+  )
+}
+
+function toLocalDateString(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
-const MONTH_NAMES = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월']
+const MONTH_NAMES = [
+  '1월', '2월', '3월', '4월', '5월', '6월',
+  '7월', '8월', '9월', '10월', '11월', '12월',
+]
 
+// --- 상태 배지 ---
+const SESSION_STATUS_CONFIG: Record<SessionStatus, { label: string; className: string }> = {
+  open: { label: '모집 중', className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400' },
+  closed: { label: '마감', className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400' },
+  in_progress: { label: '진행 중', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400' },
+  completed: { label: '종료', className: 'bg-muted text-muted-foreground' },
+}
+
+// 시즌별 배경색 (연한 톤, Tailwind inline style로 처리)
+const SEASON_COLORS = [
+  { bg: 'rgba(59,130,246,0.12)', dot: '#3b82f6' },   // blue
+  { bg: 'rgba(168,85,247,0.12)', dot: '#a855f7' },    // purple
+  { bg: 'rgba(16,185,129,0.12)', dot: '#10b981' },    // emerald
+  { bg: 'rgba(245,158,11,0.12)', dot: '#f59e0b' },    // amber
+  { bg: 'rgba(239,68,68,0.12)', dot: '#ef4444' },     // rose
+]
+
+// --- 달력 컴포넌트 ---
 interface CalendarViewProps {
-  matches: Match[]
+  sessions: MatchSession[]
+  seasons: Season[]
   onSelectDate: (date: Date | null) => void
   selectedDate: Date | null
 }
 
-function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps) {
+function CalendarView({ sessions, seasons, onSelectDate, selectedDate }: CalendarViewProps) {
   const today = new Date()
   const [viewYear, setViewYear] = useState(today.getFullYear())
   const [viewMonth, setViewMonth] = useState(today.getMonth())
@@ -57,11 +87,21 @@ function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps
     else setViewMonth((m) => m + 1)
   }
 
-  // 해당 날짜에 경기가 있는지 체크
-  const hasMatch = (day: number) => {
-    return matches.some((m) => {
-      const d = new Date(m.scheduled_at)
+  const hasSession = (day: number) => {
+    return sessions.some((s) => {
+      const d = new Date(s.scheduled_date + 'T00:00:00')
       return d.getFullYear() === viewYear && d.getMonth() === viewMonth && d.getDate() === day
+    })
+  }
+
+  // 이 날짜가 속하는 시즌 인덱스 반환 (-1이면 해당 없음)
+  const getSeasonIndex = (day: number): number => {
+    const thisDate = new Date(viewYear, viewMonth, day)
+    const dayStart = thisDate.getTime()
+    return seasons.findIndex((season, _idx) => {
+      const start = new Date(season.started_at).getTime()
+      const end = season.ended_at ? new Date(season.ended_at).getTime() : Infinity
+      return dayStart >= start && dayStart <= end
     })
   }
 
@@ -69,7 +109,6 @@ function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps
     ...Array(firstDay).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ]
-  // 6행 맞추기
   while (cells.length % 7 !== 0) cells.push(null)
 
   return (
@@ -113,7 +152,9 @@ function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps
           const thisDate = new Date(viewYear, viewMonth, day)
           const isToday = isSameDay(thisDate, today)
           const isSelected = selectedDate ? isSameDay(thisDate, selectedDate) : false
-          const matchDay = hasMatch(day)
+          const sessionDay = hasSession(day)
+          const seasonIdx = getSeasonIndex(day)
+          const seasonColor = seasonIdx >= 0 ? SEASON_COLORS[seasonIdx % SEASON_COLORS.length] : null
 
           return (
             <button
@@ -123,6 +164,7 @@ function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps
                 if (isSelected) onSelectDate(null)
                 else onSelectDate(thisDate)
               }}
+              style={!isSelected && seasonColor ? { backgroundColor: seasonColor.bg } : undefined}
               className={cn(
                 'relative flex h-10 w-full flex-col items-center justify-center text-sm transition-colors',
                 'hover:bg-muted',
@@ -132,7 +174,7 @@ function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps
               aria-label={`${viewYear}년 ${viewMonth + 1}월 ${day}일`}
             >
               {day}
-              {matchDay && (
+              {sessionDay && (
                 <span
                   className={cn(
                     'absolute bottom-1 h-1 w-1 rounded-full',
@@ -148,28 +190,123 @@ function CalendarView({ matches, onSelectDate, selectedDate }: CalendarViewProps
   )
 }
 
+// --- 세션 카드 ---
+interface SessionCardProps {
+  session: MatchSession
+  onClick: () => void
+}
+
+function SessionCard({ session, onClick }: SessionCardProps) {
+  const statusCfg = SESSION_STATUS_CONFIG[session.status]
+  const maxParticipants = session.team_size * 2
+  const count = session.registration_count ?? 0
+
+  const timeLabel = session.scheduled_start
+    ? session.scheduled_start.slice(0, 5)
+    : '시간 미정'
+
+  const dateObj = new Date(session.scheduled_date + 'T00:00:00')
+  const dateLabel = `${dateObj.getMonth() + 1}월 ${dateObj.getDate()}일 (${WEEKDAYS[dateObj.getDay()]})`
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left rounded-lg border bg-card p-4 shadow-sm hover:shadow-md hover:border-ow-orange-500/40 transition-all duration-200"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-semibold text-sm">{session.title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {dateLabel} · {timeLabel}
+          </p>
+        </div>
+        <span
+          className={cn(
+            'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
+            statusCfg.className
+          )}
+        >
+          {statusCfg.label}
+        </span>
+      </div>
+      <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{count}</span>
+        <span>/ {maxParticipants}명</span>
+        <span className="mx-1">·</span>
+        <span>{session.total_games}게임</span>
+        <span className="mx-1">·</span>
+        <span>탱 {session.tank_count} / 딜 {session.dps_count} / 힐 {session.support_count}</span>
+      </div>
+    </button>
+  )
+}
+
+// --- 메인 페이지 ---
+interface SessionCreateForm {
+  title: string
+  scheduled_date: string
+  scheduled_start: string
+  total_games: number
+  team_size: number
+  tank_count: number
+  dps_count: number
+  support_count: number
+}
+
 export default function MatchListPage() {
   const { user, isAdmin } = useAuth()
   const navigate = useNavigate()
+
+  // 기존 Match 상태
   const [matches, setMatches] = useState<Match[]>([])
   const [seasonId, setSeasonId] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({ title: '', scheduled_at: '' })
-  const [loading, setLoading] = useState(false)
   const [registeredMatchIds, setRegisteredMatchIds] = useState<Set<string>>(new Set())
-  const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [matchHistoryOpen, setMatchHistoryOpen] = useState(false)
+
+  // 시즌 목록 상태
+  const [allSeasons, setAllSeasons] = useState<Season[]>([])
+
+  // 세션 상태
+  const [sessions, setSessions] = useState<MatchSession[]>([])
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createForm, setCreateForm] = useState<SessionCreateForm>({
+    title: '',
+    scheduled_date: toLocalDateString(new Date()),
+    scheduled_start: '',
+    total_games: 5,
+    team_size: 5,
+    tank_count: 1,
+    dps_count: 2,
+    support_count: 2,
+  })
+
+  // 날짜 선택 시 폼의 scheduled_date 자동 세팅
+  const handleSelectDate = (date: Date | null) => {
+    setSelectedDate(date)
+    if (date) {
+      setCreateForm((prev) => ({ ...prev, scheduled_date: toLocalDateString(date) }))
+    }
+  }
 
   useEffect(() => {
     if (!user) return
     const load = async () => {
       try {
         const seasons = await getSeasons(user.community_id)
+        setAllSeasons(seasons)
         const activeSeason = seasons.find((s) => s.status === 'active')
         if (!activeSeason) return
         setSeasonId(activeSeason.id)
-        const m = await getMatches(activeSeason.id)
+
+        const [m, s] = await Promise.all([
+          getMatches(activeSeason.id),
+          getSessions(activeSeason.id),
+        ])
         setMatches(m.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()))
+        setSessions(s.sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date)))
       } catch {
         // ignore
       }
@@ -177,19 +314,39 @@ export default function MatchListPage() {
     load()
   }, [user])
 
-  const handleCreate = async (e: FormEvent) => {
+  const handleCreateSession = async (e: FormEvent) => {
     e.preventDefault()
     if (!seasonId) return
-    setLoading(true)
+    setCreateLoading(true)
     try {
-      const m = await createMatch(seasonId, createForm)
-      setMatches((prev) => [...prev, m].sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()))
+      const newSession = await createSession(seasonId, {
+        title: createForm.title,
+        scheduled_date: createForm.scheduled_date,
+        scheduled_start: createForm.scheduled_start || undefined,
+        total_games: createForm.total_games,
+        team_size: createForm.team_size,
+        tank_count: createForm.tank_count,
+        dps_count: createForm.dps_count,
+        support_count: createForm.support_count,
+      })
+      setSessions((prev) =>
+        [...prev, newSession].sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date))
+      )
       setShowCreate(false)
-      setCreateForm({ title: '', scheduled_at: '' })
+      setCreateForm({
+        title: '',
+        scheduled_date: selectedDate ? toLocalDateString(selectedDate) : toLocalDateString(new Date()),
+        scheduled_start: '',
+        total_games: 5,
+        team_size: 5,
+        tank_count: 1,
+        dps_count: 2,
+        support_count: 2,
+      })
     } catch {
-      // ignore
+      alert('내전 생성에 실패했습니다. 활성 시즌이 있는지 확인해주세요.')
     } finally {
-      setLoading(false)
+      setCreateLoading(false)
     }
   }
 
@@ -197,182 +354,346 @@ export default function MatchListPage() {
     try {
       await registerForMatch(matchId)
       setRegisteredMatchIds((prev) => new Set(prev).add(matchId))
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 
   const handleCancel = async (matchId: string) => {
     try {
       await cancelRegistration(matchId)
-      setRegisteredMatchIds((prev) => {
-        const next = new Set(prev)
-        next.delete(matchId)
-        return next
-      })
-    } catch {
-      // ignore
-    }
+      setRegisteredMatchIds((prev) => { const next = new Set(prev); next.delete(matchId); return next })
+    } catch { /* ignore */ }
   }
 
   const handleCloseRegistration = async (matchId: string) => {
     try {
       await closeRegistration(matchId)
       navigate(`/matches/${matchId}/teams`)
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }
 
-  // 날짜 필터링
-  const displayedMatches = selectedDate
-    ? matches.filter((m) => isSameDay(new Date(m.scheduled_at), selectedDate))
-    : matches
+  // 세션 필터링
+  const displayedSessions = selectedDate
+    ? sessions.filter((s) => {
+        const d = new Date(s.scheduled_date + 'T00:00:00')
+        return isSameDay(d, selectedDate)
+      })
+    : sessions
+
+  // 시즌별 세션 그룹핑 (날짜 필터 없을 때만 사용)
+  interface SeasonGroup {
+    season: Season | null
+    sessions: MatchSession[]
+  }
+  const groupedBySeasonForDisplay = (): SeasonGroup[] => {
+    if (selectedDate || allSeasons.length === 0) return []
+    const groups: SeasonGroup[] = []
+    const usedSessionIds = new Set<string>()
+
+    for (const season of [...allSeasons].reverse()) {
+      const inSeason = sessions.filter((s) => s.season_id === season.id)
+      if (inSeason.length > 0) {
+        groups.push({ season, sessions: inSeason })
+        inSeason.forEach((s) => usedSessionIds.add(s.id))
+      }
+    }
+    // 시즌에 속하지 않는 세션
+    const unassigned = sessions.filter((s) => !usedSessionIds.has(s.id))
+    if (unassigned.length > 0) {
+      groups.push({ season: null, sessions: unassigned })
+    }
+    return groups
+  }
+  const seasonGroups = groupedBySeasonForDisplay()
 
   return (
     <Layout>
       <div className="space-y-6">
+        {/* 페이지 헤더 */}
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">내전 일정</h1>
-          <div className="flex items-center gap-2">
-            {/* 뷰 토글 */}
-            <div className="flex rounded-md border bg-muted p-0.5">
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={cn(
-                  'flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-colors',
-                  viewMode === 'list'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                aria-label="리스트 뷰"
-              >
-                <List className="h-3.5 w-3.5" />
-                리스트
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('calendar')}
-                className={cn(
-                  'flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-colors',
-                  viewMode === 'calendar'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                aria-label="달력 뷰"
-              >
-                <Calendar className="h-3.5 w-3.5" />
-                달력
-              </button>
+          <h1 className="text-2xl font-bold">내전</h1>
+          {isAdmin && (
+            <Button size="sm" onClick={() => setShowCreate(true)} disabled={!seasonId}>
+              <Plus className="mr-1 h-4 w-4" />
+              내전 생성
+            </Button>
+          )}
+        </div>
+
+        {/* 2-column 레이아웃 */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
+          {/* 왼쪽: 달력 */}
+          <div className="lg:sticky lg:top-20 lg:self-start">
+            <CalendarView
+              sessions={sessions}
+              seasons={allSeasons}
+              selectedDate={selectedDate}
+              onSelectDate={handleSelectDate}
+            />
+          </div>
+
+          {/* 오른쪽: 세션 패널 */}
+          <div className="space-y-3">
+            {/* 날짜 필터 헤더 */}
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">
+                {selectedDate
+                  ? `${selectedDate.getMonth() + 1}월 ${selectedDate.getDate()}일 내전 (${displayedSessions.length}건)`
+                  : `전체 내전 (${sessions.length}건)`}
+              </p>
+              {selectedDate && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(null)}
+                  className="text-xs text-muted-foreground underline hover:text-foreground transition-colors"
+                >
+                  전체 보기
+                </button>
+              )}
             </div>
 
-            {isAdmin && (
-              <Button size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="mr-1 h-4 w-4" />
-                내전 생성
-              </Button>
+            {/* 세션 목록 */}
+            {selectedDate ? (
+              // 날짜 선택 시: 필터된 세션 단순 목록
+              displayedSessions.length === 0 ? (
+                <EmptyState
+                  icon={<Calendar className="h-8 w-8" />}
+                  title="예정된 내전이 없습니다"
+                  description="이 날짜에 예정된 내전이 없습니다."
+                />
+              ) : (
+                <div className="space-y-2">
+                  {displayedSessions.map((s) => (
+                    <SessionCard
+                      key={s.id}
+                      session={s}
+                      onClick={() => navigate(`/sessions/${s.id}`)}
+                    />
+                  ))}
+                </div>
+              )
+            ) : seasonGroups.length > 0 ? (
+              // 전체 보기: 시즌별 그룹핑
+              <div className="space-y-5">
+                {seasonGroups.map(({ season, sessions: groupSessions }, groupIdx) => {
+                  const seasonColor = SEASON_COLORS[groupIdx % SEASON_COLORS.length]
+                  return (
+                    <div key={season?.id ?? 'unassigned'} className="space-y-2">
+                      {/* 시즌 헤더 */}
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 rounded-full shrink-0"
+                          style={{ backgroundColor: season ? seasonColor.dot : '#94a3b8' }}
+                        />
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          {season ? season.name : '시즌 미배정'}
+                        </span>
+                        {season?.status === 'active' && (
+                          <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/40 dark:text-green-400">
+                            진행 중
+                          </span>
+                        )}
+                      </div>
+                      {groupSessions.map((s) => (
+                        <SessionCard
+                          key={s.id}
+                          session={s}
+                          onClick={() => navigate(`/sessions/${s.id}`)}
+                        />
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : sessions.length === 0 ? (
+              <EmptyState
+                icon={<Calendar className="h-8 w-8" />}
+                title="예정된 내전이 없습니다"
+                description={
+                  seasonId
+                    ? '내전을 생성하면 여기에 표시됩니다.'
+                    : '활성 시즌이 없습니다. 관리 페이지에서 시즌을 먼저 생성해주세요.'
+                }
+              />
+            ) : (
+              <div className="space-y-2">
+                {sessions.map((s) => (
+                  <SessionCard
+                    key={s.id}
+                    session={s}
+                    onClick={() => navigate(`/sessions/${s.id}`)}
+                  />
+                ))}
+              </div>
             )}
           </div>
         </div>
 
-        {/* 달력 뷰 */}
-        {viewMode === 'calendar' && (
-          <CalendarView
-            matches={matches}
-            selectedDate={selectedDate}
-            onSelectDate={setSelectedDate}
-          />
-        )}
+        {/* 지난 내전 기록 접이식 섹션 */}
+        <div className="rounded-xl border bg-card shadow-sm">
+          <button
+            type="button"
+            onClick={() => setMatchHistoryOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/50 transition-colors rounded-xl"
+          >
+            <span>지난 내전 기록</span>
+            {matchHistoryOpen ? (
+              <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )}
+          </button>
 
-        {/* 선택된 날짜 표시 */}
-        {selectedDate && (
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">
-              {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일 경기 ({displayedMatches.length}건)
-            </p>
-            <button
-              type="button"
-              onClick={() => setSelectedDate(null)}
-              className="text-xs text-muted-foreground underline hover:text-foreground"
-            >
-              전체 보기
-            </button>
-          </div>
-        )}
-
-        {/* 경기 목록 */}
-        {displayedMatches.length === 0 ? (
-          <EmptyState
-            icon={<Calendar className="h-8 w-8" />}
-            title="예정된 경기가 없습니다"
-            description={selectedDate ? '이 날짜에 예정된 경기가 없습니다.' : '관리자가 새 내전을 등록하면 여기에 표시됩니다.'}
-          />
-        ) : (
-          <div className="space-y-4">
-            {displayedMatches.map((m) => {
-              const participantCount = (m as Match & { participants?: unknown[] }).participants?.length ?? 0
-              return (
-                <div key={m.id} className="space-y-2">
-                  <MatchCard
-                    title={m.title}
-                    scheduledAt={m.scheduled_at}
-                    status={m.status}
-                    currentParticipants={participantCount}
-                  />
-                  {m.status === 'open' && user && (
-                    <div className="flex gap-2 px-1">
-                      {registeredMatchIds.has(m.id) ? (
-                        <Button variant="outline" size="sm" onClick={() => handleCancel(m.id)}>
-                          참가 취소
-                        </Button>
-                      ) : (
-                        <Button size="sm" onClick={() => handleRegister(m.id)}>
-                          참가 신청
-                        </Button>
-                      )}
-                      {isAdmin && (
-                        <Button variant="outline" size="sm" onClick={() => handleCloseRegistration(m.id)}>
-                          마감 및 팀 구성
-                        </Button>
+          {matchHistoryOpen && (
+            <div className="border-t px-4 pb-4 pt-3 space-y-4">
+              {matches.length === 0 ? (
+                <EmptyState
+                  icon={<Calendar className="h-6 w-6" />}
+                  title="내전 기록이 없습니다"
+                  description="완료된 내전이 여기에 표시됩니다."
+                />
+              ) : (
+                matches.map((m) => {
+                  const participantCount = (m as Match & { participants?: unknown[] }).participants?.length ?? 0
+                  return (
+                    <div key={m.id} className="space-y-2">
+                      <MatchCard
+                        title={m.title}
+                        scheduledAt={m.scheduled_at}
+                        status={m.status}
+                        currentParticipants={participantCount}
+                      />
+                      {m.status === 'open' && user && (
+                        <div className="flex gap-2 px-1">
+                          {registeredMatchIds.has(m.id) ? (
+                            <Button variant="outline" size="sm" onClick={() => handleCancel(m.id)}>
+                              참가 취소
+                            </Button>
+                          ) : (
+                            <Button size="sm" onClick={() => handleRegister(m.id)}>
+                              참가 신청
+                            </Button>
+                          )}
+                          {isAdmin && (
+                            <Button variant="outline" size="sm" onClick={() => handleCloseRegistration(m.id)}>
+                              마감 및 팀 구성
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* 세션 생성 다이얼로그 */}
       <Dialog open={showCreate} onClose={() => setShowCreate(false)}>
         <DialogHeader>
           <DialogTitle>내전 생성</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleCreate} className="mt-4 space-y-4">
+        <form onSubmit={handleCreateSession} className="mt-4 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="match-title">제목</Label>
+            <Label htmlFor="session-title">제목</Label>
             <Input
-              id="match-title"
+              id="session-title"
               value={createForm.title}
               onChange={(e) => setCreateForm((p) => ({ ...p, title: e.target.value }))}
               placeholder="예: 2026.03.10 정기 내전"
               required
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="match-date">날짜/시간</Label>
-            <Input
-              id="match-date"
-              type="datetime-local"
-              value={createForm.scheduled_at}
-              onChange={(e) => setCreateForm((p) => ({ ...p, scheduled_at: e.target.value }))}
-              required
-            />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="session-date">날짜</Label>
+              <Input
+                id="session-date"
+                type="date"
+                value={createForm.scheduled_date}
+                onChange={(e) => setCreateForm((p) => ({ ...p, scheduled_date: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-start">시작 시간</Label>
+              <Input
+                id="session-start"
+                type="time"
+                value={createForm.scheduled_start}
+                onChange={(e) => setCreateForm((p) => ({ ...p, scheduled_start: e.target.value }))}
+                placeholder="HH:MM"
+              />
+            </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="session-total-games">총 게임 수</Label>
+              <Input
+                id="session-total-games"
+                type="number"
+                min={1}
+                value={createForm.total_games}
+                onChange={(e) => setCreateForm((p) => ({ ...p, total_games: Number(e.target.value) }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-team-size">팀 사이즈</Label>
+              <Input
+                id="session-team-size"
+                type="number"
+                min={1}
+                value={createForm.team_size}
+                onChange={(e) => setCreateForm((p) => ({ ...p, team_size: Number(e.target.value) }))}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="session-tank">탱커 수</Label>
+              <Input
+                id="session-tank"
+                type="number"
+                min={0}
+                value={createForm.tank_count}
+                onChange={(e) => setCreateForm((p) => ({ ...p, tank_count: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-dps">딜러 수</Label>
+              <Input
+                id="session-dps"
+                type="number"
+                min={0}
+                value={createForm.dps_count}
+                onChange={(e) => setCreateForm((p) => ({ ...p, dps_count: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-support">힐러 수</Label>
+              <Input
+                id="session-support"
+                type="number"
+                min={0}
+                value={createForm.support_count}
+                onChange={(e) => setCreateForm((p) => ({ ...p, support_count: Number(e.target.value) }))}
+              />
+            </div>
+          </div>
+
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>취소</Button>
-            <Button type="submit" disabled={loading}>{loading ? '생성 중...' : '생성'}</Button>
+            <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
+              취소
+            </Button>
+            <Button type="submit" disabled={createLoading}>
+              {createLoading ? '생성 중...' : '생성'}
+            </Button>
           </DialogFooter>
         </form>
       </Dialog>

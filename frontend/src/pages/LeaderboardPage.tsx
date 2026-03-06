@@ -8,9 +8,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { useAuth } from '@/contexts/AuthContext'
 import { getSeasons } from '@/api/seasons'
-import { getLeaderboard } from '@/api/leaderboard'
+import { getLeaderboard, type LeaderboardEntry } from '@/api/leaderboard'
+import { getHeroes, type Hero } from '@/api/heroes'
 import type { Season, MainRole } from '@/types'
-import type { MemberResponse } from '@/api/members'
 import { Trophy } from 'lucide-react'
 
 function RankBadge({ rank }: { rank: number }) {
@@ -38,19 +38,60 @@ function RankBadge({ rank }: { rank: number }) {
   return <span className="text-sm font-medium text-muted-foreground">{rank}</span>
 }
 
+function HeroPortrait({ hero, heroMap }: { hero: string; heroMap: Map<string, Hero> }) {
+  const heroData = heroMap.get(hero)
+  if (!heroData?.portrait_url) {
+    return (
+      <span
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[8px] font-medium text-muted-foreground"
+        title={hero}
+      >
+        {hero.slice(0, 2)}
+      </span>
+    )
+  }
+  return (
+    <img
+      src={heroData.portrait_url}
+      alt={hero}
+      title={hero}
+      className="h-6 w-6 rounded-full object-cover border border-border"
+    />
+  )
+}
+
+const TIER_COLORS: Record<string, string> = {
+  Champion: 'text-pink-500',
+  Grandmaster: 'text-purple-600',
+  Master: 'text-lime-500',
+  Diamond: 'text-blue-500',
+  Platinum: 'text-teal-500',
+  Gold: 'text-yellow-600',
+  Silver: 'text-gray-400',
+  Bronze: 'text-amber-800',
+}
+
 export default function LeaderboardPage() {
   const { user } = useAuth()
   const [seasons, setSeasons] = useState<Season[]>([])
   const [selectedSeason, setSelectedSeason] = useState('')
-  const [players, setPlayers] = useState<MemberResponse[]>([])
+  const [players, setPlayers] = useState<LeaderboardEntry[]>([])
   const [roleFilter, setRoleFilter] = useState('all')
+  const [heroMap, setHeroMap] = useState<Map<string, Hero>>(new Map())
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!user) return
     const load = async () => {
       try {
-        const s = await getSeasons(user.community_id)
+        const [s, heroes] = await Promise.all([
+          getSeasons(user.community_id),
+          getHeroes(),
+        ])
         setSeasons(s)
+        const map = new Map<string, Hero>()
+        heroes.forEach((h) => map.set(h.name, h))
+        setHeroMap(map)
         const active = s.find((ss) => ss.status === 'active')
         if (active) setSelectedSeason(active.id)
       } catch {
@@ -63,38 +104,65 @@ export default function LeaderboardPage() {
   useEffect(() => {
     if (!user) return
     const load = async () => {
+      setLoading(true)
       try {
-        const lb = await getLeaderboard(user.community_id)
+        const lb = await getLeaderboard(
+          user.community_id,
+          selectedSeason || undefined,
+        )
         setPlayers(lb)
       } catch {
-        // ignore
+        setPlayers([])
+      } finally {
+        setLoading(false)
       }
     }
     load()
   }, [user, selectedSeason])
 
-  const filtered = roleFilter === 'all'
-    ? players
-    : players.filter((p) => p.main_role === roleFilter)
+  // 포지션 탭 선택 시: 해당 포지션 rank가 있는 사람 필터 + 해당 포지션 MMR 기준 정렬
+  const getPositionMmr = (p: LeaderboardEntry, position: string): number | null => {
+    const pr = p.position_ranks.find((r) => r.position === position)
+    return pr?.mmr ?? null
+  }
 
-  const sorted = [...filtered].sort((a, b) => (b.mmr ?? 0) - (a.mmr ?? 0))
+  const filtered =
+    roleFilter === 'all'
+      ? players
+      : players.filter((p) => getPositionMmr(p, roleFilter) != null)
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (roleFilter === 'all') return (b.mmr ?? 0) - (a.mmr ?? 0)
+    return (getPositionMmr(b, roleFilter) ?? 0) - (getPositionMmr(a, roleFilter) ?? 0)
+  })
+
+  const selectedSeasonName = seasons.find((s) => s.id === selectedSeason)?.name ?? '현재'
 
   return (
     <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <Trophy className="h-6 w-6 text-ow-orange-500" />
-            파워랭킹
-          </h1>
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-bold">
+              <Trophy className="h-6 w-6 text-ow-orange-500" />
+              파워랭킹
+            </h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {selectedSeasonName} 기준
+            </p>
+          </div>
           {seasons.length > 0 && (
             <Select
               value={selectedSeason}
               onChange={(e) => setSelectedSeason(e.target.value)}
               className="w-48"
+              aria-label="시즌 선택"
             >
+              <option value="">전체 (현재)</option>
               {seasons.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
               ))}
             </Select>
           )}
@@ -109,7 +177,11 @@ export default function LeaderboardPage() {
           </TabsList>
 
           <TabsContent value={roleFilter}>
-            {sorted.length === 0 ? (
+            {loading ? (
+              <div className="py-12 text-center text-muted-foreground text-sm">
+                불러오는 중...
+              </div>
+            ) : sorted.length === 0 ? (
               <EmptyState
                 icon={<Trophy className="h-8 w-8" />}
                 title="랭킹 데이터가 없습니다"
@@ -124,6 +196,10 @@ export default function LeaderboardPage() {
                       <TableHead className="font-semibold">플레이어</TableHead>
                       <TableHead className="hidden sm:table-cell font-semibold">본명</TableHead>
                       <TableHead className="font-semibold">역할군</TableHead>
+                      <TableHead className="hidden md:table-cell font-semibold">주 영웅</TableHead>
+                      {roleFilter !== 'all' && (
+                        <TableHead className="text-center font-semibold">티어</TableHead>
+                      )}
                       <TableHead className="text-right font-semibold">MMR</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -138,7 +214,12 @@ export default function LeaderboardPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <Avatar nickname={p.nickname} src={p.avatar_url ?? null} size="sm" role={p.main_role as MainRole | undefined} />
+                            <Avatar
+                              nickname={p.nickname}
+                              src={p.avatar_url ?? null}
+                              size="sm"
+                              role={p.main_role as MainRole | undefined}
+                            />
                             <span className="font-medium">{p.nickname}</span>
                           </div>
                         </TableCell>
@@ -148,9 +229,39 @@ export default function LeaderboardPage() {
                         <TableCell>
                           {p.main_role && <RoleBadge role={p.main_role as MainRole} />}
                         </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {(() => {
+                            const displayHeroes = roleFilter === 'all'
+                              ? (p.main_heroes ?? []).slice(0, 3)
+                              : (p.main_heroes ?? []).filter((h) => heroMap.get(h)?.role === roleFilter).slice(0, 3)
+                            return displayHeroes.length > 0 ? (
+                              <div className="flex items-center gap-1">
+                                {displayHeroes.map((hero) => (
+                                  <HeroPortrait key={hero} hero={hero} heroMap={heroMap} />
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )
+                          })()}
+                        </TableCell>
+                        {roleFilter !== 'all' && (() => {
+                          const pr = p.position_ranks.find((r) => r.position === roleFilter)
+                          return (
+                            <TableCell className="text-center">
+                              {pr ? (
+                                <span className={`text-sm font-semibold ${TIER_COLORS[pr.rank?.split(' ')[0]] ?? 'text-muted-foreground'}`}>
+                                  {pr.rank}
+                                </span>
+                              ) : '-'}
+                            </TableCell>
+                          )
+                        })()}
                         <TableCell className="text-right">
                           <span className="tabular-nums font-semibold">
-                            {p.mmr ?? 1000}
+                            {roleFilter === 'all'
+                              ? (p.mmr ?? 1000)
+                              : (getPositionMmr(p, roleFilter) ?? '-')}
                           </span>
                         </TableCell>
                       </TableRow>

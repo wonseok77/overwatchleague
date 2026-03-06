@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import type { ReactNode } from 'react'
-import MainPage from '@/pages/MainPage'
 import LoginPage from '@/pages/LoginPage'
 import RegisterPage from '@/pages/RegisterPage'
 import MatchListPage from '@/pages/MatchListPage'
@@ -11,6 +10,7 @@ import LeaderboardPage from '@/pages/LeaderboardPage'
 import ProfilePage from '@/pages/ProfilePage'
 import HighlightsPage from '@/pages/HighlightsPage'
 import AdminPage from '@/pages/AdminPage'
+import SessionDetailPage from '@/pages/SessionDetailPage'
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth()
@@ -20,9 +20,9 @@ function PrivateRoute({ children }: { children: ReactNode }) {
 }
 
 function AdminRoute({ children }: { children: ReactNode }) {
-  const { isAdmin, isLoading } = useAuth()
+  const { isAdminOrManager, isLoading } = useAuth()
   if (isLoading) return null
-  if (!isAdmin) return <Navigate to="/" replace />
+  if (!isAdminOrManager) return <Navigate to="/" replace />
   return <>{children}</>
 }
 
@@ -31,7 +31,7 @@ export default function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<MainPage />} />
+          <Route path="/" element={<Navigate to="/leaderboard" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/matches" element={<MatchListPage />} />
@@ -40,6 +40,7 @@ export default function App() {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/highlights" element={<HighlightsPage />} />
           <Route path="/profile/:id" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
+          <Route path="/sessions/:id" element={<PrivateRoute><SessionDetailPage /></PrivateRoute>} />
           <Route path="/admin/*" element={<AdminRoute><AdminPage /></AdminRoute>} />
         </Routes>
       </AuthProvider>

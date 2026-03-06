@@ -177,6 +177,102 @@ MMR 변동:
 - Backend pytest: 110 passed, 2 skipped (기존 SQLite ARRAY 이슈)
 - Frontend: tsc --noEmit OK, vite build OK
 
+### Phase 5: 매치메이킹 고도화 (백엔드) ✅ 완료
+
+**팀:** 사티아(PO) + 피차이(Architect) + 젠슨(Backend) + 베조스(QA)
+**테스트:** 149 passed, 2 skipped, 0 failed
+
+**신규 파일 (6개):**
+- `backend/app/models/session.py` — MatchSession, SessionRegistration, MatchmakingResult 모델
+- `backend/app/services/matchmaking.py` — 3단계 매치메이킹 알고리즘
+- `backend/app/routers/sessions.py` — 세션 CRUD + 신청 + 매치메이킹 API
+- `backend/app/routers/ranks.py` — 포지션별·시즌별 랭크 CRUD
+- `backend/app/schemas/session.py` — Pydantic 스키마
+- `backend/alembic/versions/002_phase5_matchmaking.py` — 신규 테이블 4개 + ALTER 3개
+
+**수정 파일 (7개):**
+- `backend/app/models/user.py` — PlayerPositionRank 추가, PlayerProfile.win_rate
+- `backend/app/models/match.py` — MatchParticipant +4컬럼, PlayerMatchStat +7컬럼
+- `backend/app/models/__init__.py` — 신규 모델 import
+- `backend/app/main.py` — sessions, ranks 라우터 등록
+- `backend/app/services/balancing.py` — compute_player_score 4가중치 확장, Champion=8
+- `backend/tests/conftest.py` — JSONB SQLite 컴파일러, StaticPool 격리
+- `backend/tests/test_balancing.py` — Champion 기대값 8.0
+
+**신규 테스트 (38개):**
+- `tests/test_sessions.py` — 13 tests
+- `tests/test_matchmaking.py` — 15 tests
+- `tests/test_ranks.py` — 10 tests
+
+**아키텍처 결정:**
+- 세션-매치 2계층: MatchSession(하루) → 매치메이킹 → Match(개별 경기)
+- 밸런싱 이원화: auto_balance_teams(기존) + balance_with_weights(세션 매치메이킹)
+- compute_player_score 하위호환: weights=None→기존 공식, weights→4가중치
+- 균등 분배: session_games[user] 적은 순 선발 → ±1경기 오차
+- EXHAUSTIVE_THRESHOLD=14: C(14,7)=3432, 5v5~7v7 완전탐색
+
+**Ralph Loop:** 8 스토리 전부 1회 통과, 에스컬레이션 0
+
+### Phase 5b: 매치메이킹 프론트엔드 ✅ 완료
+
+**팀:** 사티아(PO) + 저커버그(Frontend) x3 + 베조스(QA)
+**테스트:** tsc OK, vitest 33 passed, build OK, pytest 149 passed
+
+**신규 파일 (3개):**
+- `frontend/src/api/sessions.ts` — 세션 CRUD + 신청 + 매치메이킹 API 클라이언트
+- `frontend/src/api/ranks.ts` — 포지션별 랭크 API 클라이언트
+- `frontend/src/pages/SessionDetailPage.tsx` — 세션 상세 + 참가 신청 + 매치메이킹 미리보기
+
+**수정 파일 (5개):**
+- `frontend/src/types/index.ts` — MatchSession, SessionRegistration, MatchmakingResult, PositionRank 타입 추가
+- `frontend/src/pages/MatchListPage.tsx` — '내전 생성' 탭 리디자인 (2-column: 달력 + 세션 패널)
+- `frontend/src/pages/ProfilePage.tsx` — 포지션별 티어 설정 UI (탱커/딜러/서포터)
+- `frontend/src/components/Navbar.tsx` — '내전 일정' → '내전 생성'
+- `frontend/src/App.tsx` — `/sessions/:id` 라우트 추가
+
+**Ralph Loop:** 7 스토리, S1(사티아 직접), S2/S3/S5 병렬, S4 순차, S6(QA), S7(문서)
+전부 1회 통과, 에스컬레이션 0
+
+### Phase 5c: OCR + Discord Webhook ✅ 완료
+
+**팀:** 사티아(PO, S1 직접) + 젠슨(Backend, S2) + 저커버그(Frontend, S3)
+**테스트:** tsc OK, vitest 33p, build OK, pytest 155p/2s
+
+**신규 파일:**
+- `backend/app/services/ocr.py` — Tesseract OCR 스코어보드 스탯 추출
+- `backend/tests/test_ocr.py` — OCR 테스트 6개
+
+**수정 파일:**
+- `backend/app/services/discord.py` — `send_matchmaking_confirmed()` 추가
+- `backend/app/routers/sessions.py` — confirm에 BackgroundTasks Discord 알림
+- `backend/app/routers/matches.py` — `POST /matches/{id}/stats/{userId}/ocr` 추가
+- `backend/requirements.txt` — pytesseract, Pillow
+- `frontend/src/api/matches.ts` — `triggerOcr()` 추가
+- `frontend/src/pages/MatchDetailPage.tsx` — OCR 추출 버튼
+
+**남은 작업 (다음 세션):**
+- [ ] Claude Vision OCR 추가 (Tesseract fallback 이미 구현)
+- [ ] 멀티 커뮤니티 온보딩 플로우
+- [ ] Discord OAuth 선택적 연동
+
+### Batch 7: 관리자 프로필 수정 + 내전 참여자 추가 (2026-03-06)
+
+**백엔드:**
+- `backend/app/routers/admin.py` — AdminMemberUpdate에 nickname/real_name/main_role/main_heroes 추가, update_member 확장 (profile 없으면 자동 생성)
+- `backend/app/routers/sessions.py` — POST /sessions/{id}/register-member 엔드포인트 추가 (관리자/매니저 전용)
+- `backend/app/routers/members.py` — 리더보드 "전체" 시 포지션별 최고 MMR 집계 로직
+- `backend/app/routers/auth.py` — get_me()에서 avatar_url 반환
+- `backend/app/schemas/auth.py` — UserResponse에 avatar_url 필드 추가
+
+**프론트엔드:**
+- `frontend/src/api/admin.ts` — AdminMemberUpdate 인터페이스 확장
+- `frontend/src/api/sessions.ts` — adminRegisterMember 함수 추가
+- `frontend/src/pages/AdminPage.tsx` — 멤버 프로필 수정 다이얼로그 (닉네임/본명/주포지션/주영웅)
+- `frontend/src/pages/SessionDetailPage.tsx` — 관리자 참여자 추가 다이얼로그
+- `frontend/src/pages/LeaderboardPage.tsx` — 포지션별 Tank/DPS/Support 3개 컬럼 분리 + 티어 색상
+
+**테스트:** tsc OK, vite build OK, backend import OK
+
 ### Phase 4: 확장
 - [ ] 멀티 커뮤니티 온보딩 플로우
 - [ ] Discord OAuth 선택적 연동
@@ -215,3 +311,7 @@ docker-compose exec backend alembic upgrade head
 - 테스트 파일 미사용 선언도 빌드 실패 원인 → `_` prefix가 아닌 완전 삭제로 해결
 - 티어 세부 단계 1~5: `RankBadge`에서 `rank.split(' ')[0]`으로 기본 티어 추출 필요
 - `RANKS` 생성 패턴: `BASE_RANKS.flatMap(r => [5,4,3,2,1].map(n => \`${r} ${n}\`))` 로 40개 옵션 자동 생성
+- JSONB는 SQLite에서 compiles 핸들러로 TEXT 대응 (with_variant 불필요)
+- SQLite StaticPool + `sqlite://` 패턴으로 테스트 격리 (cache=shared 대신)
+- compute_player_score 확장 시 기본 파라미터(win_rate=0.0, role_stat_score=0.0)로 하위호환 유지
+- Champion rank_score는 8 (Grandmaster=7과 구분)

@@ -23,7 +23,7 @@ export default function RegisterPage() {
     password: '',
     real_name: '',
     nickname: '',
-    community_slug: '',
+    community_slug: 'ow-league',
     main_role: '',
     current_rank: '',
     hero1: '',
@@ -123,10 +123,6 @@ export default function RegisterPage() {
             <div className="space-y-2">
               <Label htmlFor="password">비밀번호</Label>
               <Input id="password" type="password" value={form.password} onChange={(e) => update('password', e.target.value)} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="community_slug">커뮤니티</Label>
-              <Input id="community_slug" placeholder="커뮤니티 슬러그" value={form.community_slug} onChange={(e) => update('community_slug', e.target.value)} required />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

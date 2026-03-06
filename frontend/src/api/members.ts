@@ -81,6 +81,23 @@ export async function createMember(communityId: string, data: {
   return res.data
 }
 
+export interface ProfileUpdatePayload {
+  nickname?: string
+  main_role?: string
+  main_heroes?: string[]
+}
+
+export async function updateProfile(userId: string, data: ProfileUpdatePayload): Promise<{
+  nickname?: string
+  main_role: string
+  main_heroes: string[]
+  current_rank: string | null
+  mmr: number
+}> {
+  const res = await apiClient.patch(`/users/${userId}/profile`, data)
+  return res.data
+}
+
 export async function uploadAvatar(userId: string, file: File): Promise<{ avatar_url: string }> {
   const formData = new FormData()
   formData.append('file', file)

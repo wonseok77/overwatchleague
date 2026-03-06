@@ -8,14 +8,15 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = '001_add_avatar_url'
-down_revision = None
+down_revision = '000_initial_schema'
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    op.add_column('users', sa.Column('avatar_url', sa.String(500), nullable=True))
+    # avatar_url is already included in 000_initial_schema
+    pass
 
 
 def downgrade():
-    op.drop_column('users', 'avatar_url')
+    pass

@@ -45,6 +45,14 @@ class MatchParticipant(Base):
     )
     team: Mapped[Optional[str]] = mapped_column(SAEnum("A", "B", name="team_side"), nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("match_sessions.id"), nullable=True
+    )
+    assigned_position: Mapped[Optional[str]] = mapped_column(
+        SAEnum("tank", "dps", "support", name="position_type", create_type=False), nullable=True
+    )
+    priority_used: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    session_game_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     match: Mapped["Match"] = relationship("Match", back_populates="participants")
 
@@ -60,6 +68,15 @@ class PlayerMatchStat(Base):
     mmr_before: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     mmr_after: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     mmr_change: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    kills: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    deaths: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    assists: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    damage_dealt: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    healing_done: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    survivability_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stat_source: Mapped[Optional[str]] = mapped_column(
+        SAEnum("manual", "ocr", name="stat_source_type"), nullable=True
+    )
 
     match: Mapped["Match"] = relationship("Match", back_populates="stats")
 

@@ -10,9 +10,11 @@ from app.database import get_db
 from app.models.community import Community
 from app.models.match import Match, MatchParticipant, PlayerMatchStat, SeasonStat
 from app.models.season import Season
-from app.models.user import User, PlayerProfile
-from app.services.auth import require_admin
+from app.models.session import SessionRegistration
+from app.models.user import User, PlayerProfile, PlayerPositionRank
+from app.services.auth import require_admin, require_manager_or_admin
 from app.services.discord import send_discord_webhook
+from app.services.mmr import mmr_to_rank
 
 import httpx
 
@@ -36,15 +38,26 @@ class AdminSeasonResponse(BaseModel):
 class AdminSeasonCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    started_at: Optional[str] = None  # ISO date string, optional
+    ended_at: Optional[str] = None  # ISO date string, optional
 
 
 class AdminSeasonUpdate(BaseModel):
-    status: str  # "active" | "closed"
+    name: Optional[str] = None
+    status: Optional[str] = None  # "active" | "closed"
+    started_at: Optional[str] = None  # ISO date string
+    ended_at: Optional[str] = None  # ISO date string
 
 
 class FinalizeResponse(BaseModel):
     message: str
     stats_created: int
+
+
+class PositionRankInfo(BaseModel):
+    position: str
+    rank: str
+    mmr: Optional[int] = None
 
 
 class AdminMemberResponse(BaseModel):
@@ -53,9 +66,11 @@ class AdminMemberResponse(BaseModel):
     real_name: str
     email: str
     role: str
+    avatar_url: Optional[str] = None
     main_role: Optional[str] = None
     current_rank: Optional[str] = None
     mmr: Optional[int] = None
+    position_ranks: List[PositionRankInfo] = []
 
     class Config:
         from_attributes = True
@@ -64,6 +79,19 @@ class AdminMemberResponse(BaseModel):
 class AdminMemberUpdate(BaseModel):
     role: Optional[str] = None
     current_rank: Optional[str] = None
+    nickname: Optional[str] = None
+    real_name: Optional[str] = None
+    main_role: Optional[str] = None  # tank | dps | support
+    main_heroes: Optional[List[str]] = None
+
+
+class AdminPositionRankUpdate(BaseModel):
+    position: str  # "tank" | "dps" | "support"
+    mmr: int
+
+
+class AdminPositionRanksUpdate(BaseModel):
+    position_ranks: List[AdminPositionRankUpdate]
 
 
 class WebhookUpdate(BaseModel):
@@ -94,15 +122,26 @@ def _season_response(s: Season) -> AdminSeasonResponse:
 
 def _member_response(user: User) -> AdminMemberResponse:
     profile = user.profile
+    position_ranks_data = [
+        PositionRankInfo(
+            position=pr.position,
+            rank=pr.rank,
+            mmr=pr.mmr,
+        )
+        for pr in (user.position_ranks if hasattr(user, 'position_ranks') and user.position_ranks else [])
+        if pr.season_id is None  # 시즌 미지정 = 현재 전역 랭크
+    ]
     return AdminMemberResponse(
         user_id=str(user.id),
         nickname=user.nickname,
         real_name=user.real_name,
         email=user.email,
         role=user.role,
+        avatar_url=user.avatar_url,
         main_role=profile.main_role if profile else None,
         current_rank=profile.current_rank if profile else None,
         mmr=profile.mmr if profile else None,
+        position_ranks=position_ranks_data,
     )
 
 
@@ -111,7 +150,7 @@ def _member_response(user: User) -> AdminMemberResponse:
 @router.get("/seasons", response_model=List[AdminSeasonResponse])
 def list_seasons(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     seasons = db.query(Season).filter(Season.community_id == admin.community_id).all()
     return [_season_response(s) for s in seasons]
@@ -121,9 +160,13 @@ def list_seasons(
 def create_season(
     req: AdminSeasonCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     season = Season(community_id=admin.community_id, name=req.name)
+    if req.started_at:
+        season.started_at = datetime.fromisoformat(req.started_at)
+    if req.ended_at:
+        season.ended_at = datetime.fromisoformat(req.ended_at)
     db.add(season)
     db.commit()
     db.refresh(season)
@@ -135,38 +178,74 @@ def update_season(
     season_id: uuid.UUID,
     req: AdminSeasonUpdate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     season = db.query(Season).filter(Season.id == season_id).first()
     if not season:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
     if season.community_id != admin.community_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
-    if season.status == req.status:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Season already has this status")
-
-    season.status = req.status
-    if req.status == "closed":
-        season.ended_at = datetime.utcnow()
+    if req.name:
+        season.name = req.name
+    if req.status:
+        season.status = req.status
+        if req.status == "closed" and not req.ended_at and not season.ended_at:
+            season.ended_at = datetime.utcnow()
+        if req.status == "active":
+            season.ended_at = None
+    if req.started_at:
+        season.started_at = datetime.fromisoformat(req.started_at)
+    if req.ended_at:
+        season.ended_at = datetime.fromisoformat(req.ended_at)
     db.commit()
     db.refresh(season)
     return _season_response(season)
+
+
+@router.delete("/seasons/{season_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_season(
+    season_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_manager_or_admin),
+):
+    season = db.query(Season).filter(Season.id == season_id).first()
+    if not season:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
+    if season.community_id != admin.community_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
+
+    # 관련 데이터 확인 - 매치가 있으면 삭제 불가
+    match_count = db.query(Match).filter(Match.season_id == season_id).count()
+    if match_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete season with {match_count} matches. Delete matches first."
+        )
+
+    # 세션도 확인
+    from app.models.session import MatchSession
+    session_count = db.query(MatchSession).filter(MatchSession.season_id == season_id).count()
+    if session_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete season with {session_count} sessions. Delete sessions first."
+        )
+
+    db.delete(season)
+    db.commit()
 
 
 @router.post("/seasons/{season_id}/finalize", response_model=FinalizeResponse)
 def finalize_season(
     season_id: uuid.UUID,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_manager_or_admin),
 ):
     season = db.query(Season).filter(Season.id == season_id).first()
     if not season:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Season not found")
     if season.community_id != admin.community_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
-    if season.status != "closed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Season must be closed before finalizing")
-
     # S4: Aggregation logic
     matches = (
         db.query(Match)
@@ -244,11 +323,18 @@ def list_members(
 ):
     users = (
         db.query(User)
-        .options(joinedload(User.profile))
+        .options(joinedload(User.profile), joinedload(User.position_ranks))
         .filter(User.community_id == admin.community_id)
         .all()
     )
-    return [_member_response(u) for u in users]
+    # deduplicate due to joinedload producing cartesian product
+    seen = set()
+    unique_users = []
+    for u in users:
+        if u.id not in seen:
+            seen.add(u.id)
+            unique_users.append(u)
+    return [_member_response(u) for u in unique_users]
 
 
 @router.patch("/members/{user_id}", response_model=AdminMemberResponse)
@@ -260,7 +346,7 @@ def update_member(
 ):
     user = (
         db.query(User)
-        .options(joinedload(User.profile))
+        .options(joinedload(User.profile), joinedload(User.position_ranks))
         .filter(User.id == user_id)
         .first()
     )
@@ -272,10 +358,157 @@ def update_member(
     if req.role is not None:
         user.role = req.role
 
+    if req.nickname is not None:
+        user.nickname = req.nickname
+
+    if req.real_name is not None:
+        user.real_name = req.real_name
+
     if req.current_rank is not None:
         if not user.profile:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User has no player profile")
         user.profile.current_rank = req.current_rank
+
+    if req.main_role is not None or req.main_heroes is not None:
+        if not user.profile:
+            user.profile = PlayerProfile(
+                id=uuid.uuid4(),
+                user_id=user.id,
+            )
+            db.add(user.profile)
+        if req.main_role is not None:
+            user.profile.main_role = req.main_role
+        if req.main_heroes is not None:
+            user.profile.main_heroes = req.main_heroes
+
+    db.commit()
+    db.refresh(user)
+    return _member_response(user)
+
+
+@router.delete("/members/{user_id}")
+def delete_member(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.community_id != admin.community_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
+    if admin.id == user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete yourself")
+
+    if user.profile:
+        db.delete(user.profile)
+    if user.position_ranks:
+        for pr in user.position_ranks:
+            db.delete(pr)
+    db.query(SessionRegistration).filter(SessionRegistration.user_id == user_id).delete()
+    db.delete(user)
+    db.commit()
+
+    return {"message": "Member deleted"}
+
+
+# --- Admin MMR Edit ---
+
+class AdminPositionRankUpdate(BaseModel):
+    position: str  # "tank" | "dps" | "support"
+    mmr: int
+
+
+class AdminPositionRanksUpdate(BaseModel):
+    position_ranks: List[AdminPositionRankUpdate]
+
+
+@router.patch("/members/{user_id}/position-ranks", response_model=AdminMemberResponse)
+def update_member_position_ranks(
+    user_id: uuid.UUID,
+    req: AdminPositionRanksUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.profile), joinedload(User.position_ranks))
+        .filter(User.id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.community_id != admin.community_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
+
+    for item in req.position_ranks:
+        existing = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == user_id,
+            PlayerPositionRank.season_id.is_(None),
+            PlayerPositionRank.position == item.position,
+        ).first()
+        rank_str = mmr_to_rank(item.mmr)
+        if existing:
+            existing.mmr = item.mmr
+            existing.rank = rank_str
+            existing.updated_at = datetime.utcnow()
+        else:
+            new_rank = PlayerPositionRank(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                season_id=None,
+                position=item.position,
+                rank=rank_str,
+                mmr=item.mmr,
+            )
+            db.add(new_rank)
+
+    db.commit()
+    db.refresh(user)
+    return _member_response(user)
+
+
+# --- Admin MMR Edit ---
+
+@router.patch("/members/{user_id}/position-ranks", response_model=AdminMemberResponse)
+def update_member_position_ranks(
+    user_id: uuid.UUID,
+    req: AdminPositionRanksUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    user = (
+        db.query(User)
+        .options(joinedload(User.profile), joinedload(User.position_ranks))
+        .filter(User.id == user_id)
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.community_id != admin.community_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
+
+    for item in req.position_ranks:
+        existing = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == user_id,
+            PlayerPositionRank.season_id.is_(None),
+            PlayerPositionRank.position == item.position,
+        ).first()
+        rank_str = mmr_to_rank(item.mmr)
+        if existing:
+            existing.mmr = item.mmr
+            existing.rank = rank_str
+            existing.updated_at = datetime.utcnow()
+        else:
+            new_rank = PlayerPositionRank(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                season_id=None,
+                position=item.position,
+                rank=rank_str,
+                mmr=item.mmr,
+            )
+            db.add(new_rank)
 
     db.commit()
     db.refresh(user)

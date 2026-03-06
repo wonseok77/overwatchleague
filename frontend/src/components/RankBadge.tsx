@@ -2,14 +2,14 @@ import { Badge } from './ui/badge'
 import { cn } from '../lib/utils'
 
 const rankColors: Record<string, string> = {
-  Bronze: 'bg-amber-700 text-white',
+  Bronze: 'bg-amber-800 text-amber-200',
   Silver: 'bg-gray-400 text-white',
-  Gold: 'bg-yellow-500 text-white',
-  Platinum: 'bg-cyan-500 text-white',
+  Gold: 'bg-yellow-600 text-yellow-100',
+  Platinum: 'bg-teal-500 text-white',
   Diamond: 'bg-blue-500 text-white',
-  Master: 'bg-purple-500 text-white',
-  Grandmaster: 'bg-yellow-400 text-black',
-  Champion: 'bg-gradient-to-r from-yellow-400 to-orange-500 text-white',
+  Master: 'bg-lime-500 text-white',
+  Grandmaster: 'bg-purple-600 text-white',
+  Champion: 'bg-pink-500 text-white',
 }
 
 interface RankBadgeProps {

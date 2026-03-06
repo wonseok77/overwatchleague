@@ -31,7 +31,7 @@ class TestParseRankScore:
         assert parse_rank_score("Grandmaster") == 7.0
 
     def test_champion(self):
-        assert parse_rank_score("Champion") == 7.0
+        assert parse_rank_score("Champion") == 8.0
 
     def test_none_returns_default(self):
         assert parse_rank_score(None) == 3.0
@@ -51,18 +51,18 @@ class TestParseRankScore:
 class TestComputePlayerScore:
     def test_gold_1000mmr(self):
         score = compute_player_score("Gold", 1000)
-        # 3.0 * 0.4 + 1000 * 0.006 = 1.2 + 6.0 = 7.2
-        assert score == pytest.approx(7.2)
+        # 3.0*0.3 + (1000/200)*0.4 + 0*0.2 + 0*0.1 = 0.9 + 2.0 = 2.9
+        assert score == pytest.approx(2.9)
 
     def test_diamond_1_1500mmr(self):
         score = compute_player_score("Diamond 1", 1500)
-        # 5.0 * 0.4 + 1500 * 0.006 = 2.0 + 9.0 = 11.0
-        assert score == pytest.approx(11.0)
+        # 5.0*0.3 + (1500/200)*0.4 + 0*0.2 + 0*0.1 = 1.5 + 3.0 = 4.5
+        assert score == pytest.approx(4.5)
 
     def test_none_rank_default_mmr(self):
         score = compute_player_score(None, 1000)
-        # 3.0 * 0.4 + 1000 * 0.006 = 1.2 + 6.0 = 7.2
-        assert score == pytest.approx(7.2)
+        # 3.0*0.3 + (1000/200)*0.4 + 0*0.2 + 0*0.1 = 0.9 + 2.0 = 2.9
+        assert score == pytest.approx(2.9)
 
 
 # --- _role_distribution ---

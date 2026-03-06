@@ -65,4 +65,5 @@ def get_me(current_user: User = Depends(get_current_user)):
         nickname=current_user.nickname,
         role=current_user.role,
         community_id=str(current_user.community_id),
+        avatar_url=current_user.avatar_url,
     )

@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'member'
+export type UserRole = 'admin' | 'manager' | 'member'
 export type MainRole = 'tank' | 'dps' | 'support'
 export type SeasonStatus = 'active' | 'closed'
 export type MatchStatus = 'open' | 'closed' | 'in_progress' | 'completed'
@@ -23,6 +23,7 @@ export interface User {
   discord_id: string | null
   email: string
   role: UserRole
+  avatar_url?: string | null
   created_at: string
 }
 
@@ -98,6 +99,87 @@ export interface SeasonStat {
   win_rate: number
   final_mmr: number
   rank_position: number
+}
+
+// Session types (Phase 5)
+export type SessionStatus = 'open' | 'closed' | 'in_progress' | 'completed'
+export type PositionType = 'tank' | 'dps' | 'support'
+
+export interface MatchSession {
+  id: string
+  community_id: string
+  season_id: string
+  title: string
+  scheduled_date: string
+  scheduled_start: string | null
+  total_games: number
+  status: SessionStatus
+  team_size: number
+  tank_count: number
+  dps_count: number
+  support_count: number
+  discord_announced: boolean
+  created_at: string | null
+  registration_count?: number
+}
+
+export interface SessionRegistration {
+  id: string
+  session_id: string
+  user_id: string
+  priority_1: PositionType
+  priority_2: PositionType | null
+  priority_3: PositionType | null
+  min_games: number
+  max_games: number
+  status: string
+  registered_at: string | null
+  nickname?: string | null
+  current_rank?: string | null
+  position_ranks?: Array<{position: PositionType, rank: string, mmr: number | null}>
+}
+
+export interface MatchmakingPlayer {
+  user_id: string
+  nickname: string
+  assigned_position: PositionType
+  priority_used: number
+  score: number
+}
+
+export interface MatchmakingGame {
+  game_no: number
+  team_a: MatchmakingPlayer[]
+  team_b: MatchmakingPlayer[]
+  team_a_score: number
+  team_b_score: number
+  score_diff: number
+}
+
+export interface MatchmakingPlayerStat {
+  user_id: string
+  nickname: string
+  games_played: number
+}
+
+export interface MatchmakingResult {
+  id: string
+  session_id?: string
+  is_confirmed: boolean
+  games: MatchmakingGame[]
+  bench: Array<{ user_id: string; nickname: string; reason: string }>
+  player_stats: MatchmakingPlayerStat[]
+  generated_at?: string | null
+}
+
+export interface PositionRank {
+  id: string
+  user_id: string
+  season_id: string | null
+  position: PositionType
+  rank: string
+  mmr?: number
+  updated_at: string | null
 }
 
 // API response types

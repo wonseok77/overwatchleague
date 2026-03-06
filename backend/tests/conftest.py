@@ -4,7 +4,8 @@ import uuid
 import pytest
 from sqlalchemy import create_engine, event, Text, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.dialects.postgresql import ARRAY, UUID, JSONB
 
 from app.database import Base, get_db
 from app.main import app
@@ -15,34 +16,32 @@ from app.models.match import Match, MatchParticipant
 from app.services.auth import hash_password, create_access_token
 
 # SQLite에서 PostgreSQL 전용 타입을 대체
-# ARRAY -> Text (JSON 문자열로 저장), UUID -> Text
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 
-# ARRAY를 Text로 매핑
-@event.listens_for(Base.metadata, "column_reflect")
-def _reflect_column(inspector, table, column_info):
-    pass
-
-# SQLite에서 ARRAY 컬럼을 Text로 컴파일하도록 등록
+# SQLite에서 ARRAY/JSONB 컬럼을 Text로 컴파일
 from sqlalchemy.ext.compiler import compiles
 
 @compiles(ARRAY, "sqlite")
 def _compile_array_sqlite(type_, compiler, **kw):
     return "TEXT"
 
-# SQLite in-memory (PostgreSQL 의존 제거)
-SQLALCHEMY_TEST_URL = "sqlite:///file::memory:?cache=shared"
-engine = create_engine(SQLALCHEMY_TEST_URL, connect_args={"check_same_thread": False})
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(type_, compiler, **kw):
+    return "TEXT"
 
-# SQLite에서 UUID를 text로 처리
-_enable_fk = True
+# SQLite in-memory + StaticPool (단일 연결 재사용으로 격리 문제 해결)
+SQLALCHEMY_TEST_URL = "sqlite://"
+engine = create_engine(
+    SQLALCHEMY_TEST_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_conn, connection_record):
-    if _enable_fk:
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -50,22 +49,18 @@ TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 @pytest.fixture(autouse=True)
 def setup_db():
     """각 테스트마다 DB 초기화"""
-    global _enable_fk
-    _enable_fk = True
     Base.metadata.create_all(bind=engine)
     yield
-    # FK 체크 끄고 drop해야 SQLite에서 순서 문제 없음
-    _enable_fk = False
     Base.metadata.drop_all(bind=engine)
-    _enable_fk = True
 
 
 @pytest.fixture
-def db():
+def db(setup_db):
     session = TestSessionLocal()
     try:
         yield session
     finally:
+        session.rollback()
         session.close()
 
 

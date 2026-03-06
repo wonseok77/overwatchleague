@@ -7,11 +7,13 @@ import { cn } from '@/lib/utils'
 interface NavbarProps {
   isLoggedIn?: boolean
   nickname?: string
+  realName?: string
+  avatarUrl?: string | null
   onLogout?: () => void
   isAdmin?: boolean
 }
 
-export function Navbar({ isLoggedIn = false, nickname, onLogout, isAdmin }: NavbarProps) {
+export function Navbar({ isLoggedIn = false, nickname, realName, avatarUrl, onLogout, isAdmin }: NavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
 
@@ -32,7 +34,7 @@ export function Navbar({ isLoggedIn = false, nickname, onLogout, isAdmin }: Navb
         className={navLinkClass('/matches')}
         onClick={() => setMobileOpen(false)}
       >
-        내전 일정
+        내전
       </Link>
       <Link
         to="/leaderboard"
@@ -79,10 +81,18 @@ export function Navbar({ isLoggedIn = false, nickname, onLogout, isAdmin }: Navb
         <div className="flex items-center gap-2">
           {isLoggedIn ? (
             <>
-              <Link to="/profile/me">
-                <Button variant="ghost" size="sm" className="text-sm font-medium">
-                  {nickname}
-                </Button>
+              <Link to="/profile/me" className="flex items-center gap-2">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                    {nickname?.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="hidden sm:block text-left">
+                  <p className="text-sm font-medium leading-none">{nickname}</p>
+                  {realName && <p className="text-xs text-muted-foreground leading-tight">{realName}</p>}
+                </div>
               </Link>
               <Button variant="outline" size="sm" onClick={onLogout} className="text-sm">
                 로그아웃

@@ -57,3 +57,37 @@ async def send_match_result(
         "color": 0x4ADE80,
     }
     await send_discord_webhook(webhook_url, embed)
+
+
+async def send_matchmaking_confirmed(
+    webhook_url: str,
+    session_title: str,
+    games: List[Dict[str, Any]],
+) -> None:
+    fields = []
+    for game in games:
+        game_no = game.get("game_no", "?")
+        team_a = game.get("team_a", [])
+        team_b = game.get("team_b", [])
+        score_diff = game.get("score_diff", 0)
+
+        pos_label = {"tank": "T", "dps": "D", "support": "S"}
+        a_names = "\n".join(
+            f"`{pos_label.get(p.get('assigned_position', ''), '?')}` {p.get('nickname', '?')}"
+            for p in team_a
+        )
+        b_names = "\n".join(
+            f"`{pos_label.get(p.get('assigned_position', ''), '?')}` {p.get('nickname', '?')}"
+            for p in team_b
+        )
+
+        fields.append({"name": f"Game {game_no} — Team A", "value": a_names or "TBD", "inline": True})
+        fields.append({"name": f"Game {game_no} — Team B", "value": b_names or "TBD", "inline": True})
+        fields.append({"name": "Balance", "value": f"Score diff: {score_diff:.2f}", "inline": False})
+
+    embed = {
+        "title": f"Matchmaking Confirmed: {session_title}",
+        "color": 0xF99E1A,
+        "fields": fields[:25],
+    }
+    await send_discord_webhook(webhook_url, embed)

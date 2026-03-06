@@ -18,6 +18,8 @@ import {
   submitMatchStats,
   createHighlight,
   deleteHighlight,
+  triggerOcr,
+  updateMatchStatus,
 } from '@/api/matches'
 import type { MatchDetail, MatchDetailParticipant } from '@/api/matches'
 import type { MatchResultFormData } from '@/components/MatchResultForm'
@@ -25,7 +27,7 @@ import type { HighlightData } from '@/components/HighlightCard'
 import type { MatchStatus, MainRole } from '@/types'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { Calendar, MapPin, Plus } from 'lucide-react'
+import { Calendar, MapPin, Plus, Scan } from 'lucide-react'
 
 const statusConfig: Record<MatchStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   open: { label: '모집 중', variant: 'default' },
@@ -36,12 +38,13 @@ const statusConfig: Record<MatchStatus, { label: string; variant: 'default' | 's
 
 export default function MatchDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { isAdmin } = useAuth()
+  const { isAdmin, isAdminOrManager } = useAuth()
   const [match, setMatch] = useState<MatchDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showHighlightDialog, setShowHighlightDialog] = useState(false)
   const [highlightForm, setHighlightForm] = useState({ title: '', youtube_url: '', user_id: '' })
+  const [ocrLoading, setOcrLoading] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -98,6 +101,20 @@ export default function MatchDetailPage() {
       setHighlightForm({ title: '', youtube_url: '', user_id: '' })
     } catch {
       // ignore
+    }
+  }
+
+  const handleOcrExtract = async (userId: string) => {
+    if (!id) return
+    setOcrLoading(userId)
+    try {
+      await triggerOcr(id, userId)
+      const updated = await getMatch(id)
+      setMatch(updated)
+    } catch {
+      alert('OCR 추출에 실패했습니다')
+    } finally {
+      setOcrLoading(null)
     }
   }
 
@@ -169,6 +186,18 @@ export default function MatchDetailPage() {
                 {p.mmr_change > 0 ? '+' : ''}{p.mmr_change}
               </span>
             )}
+            {isAdmin && p.screenshot_path && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={ocrLoading === p.user_id}
+                onClick={() => handleOcrExtract(p.user_id)}
+                className="ml-auto h-7 px-2 text-xs"
+              >
+                <Scan className="mr-1 h-3 w-3" />
+                {ocrLoading === p.user_id ? '추출 중...' : 'OCR 추출'}
+              </Button>
+            )}
           </div>
         ))}
       </div>
@@ -183,6 +212,25 @@ export default function MatchDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold">{match.title}</h1>
             <Badge variant={status.variant}>{status.label}</Badge>
+            {isAdminOrManager && (
+              <select
+                value={match.status}
+                onChange={async (e) => {
+                  try {
+                    const updated = await updateMatchStatus(match.id, e.target.value)
+                    setMatch((prev) => prev ? { ...prev, ...updated } : prev)
+                  } catch {
+                    alert('상태 변경에 실패했습니다')
+                  }
+                }}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="open">모집 중</option>
+                <option value="closed">마감</option>
+                <option value="in_progress">진행 중</option>
+                <option value="completed">완료</option>
+              </select>
+            )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
             {match.scheduled_at && (

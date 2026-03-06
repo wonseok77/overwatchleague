@@ -30,6 +30,11 @@ export async function updateTeams(matchId: string, teams: { user_id: string; tea
   return res.data
 }
 
+export async function updateMatchStatus(matchId: string, status: string): Promise<Match> {
+  const res = await apiClient.patch(`/matches/${matchId}/status`, { status })
+  return res.data
+}
+
 export async function submitResult(matchId: string, data: {
   map_name?: string
   team_a_score: number
@@ -97,5 +102,19 @@ export async function deleteHighlight(id: string): Promise<void> {
 
 export async function getCommunityHighlights(communityId: string, params?: { limit?: number; offset?: number }): Promise<Highlight[]> {
   const res = await apiClient.get(`/communities/${communityId}/highlights`, { params })
+  return res.data
+}
+
+export interface PlayerMatchStat {
+  user_id: string
+  heroes_played: string[] | null
+  screenshot_path: string | null
+  mmr_before: number | null
+  mmr_after: number | null
+  mmr_change: number | null
+}
+
+export async function triggerOcr(matchId: string, userId: string): Promise<PlayerMatchStat> {
+  const res = await apiClient.post(`/matches/${matchId}/stats/${userId}/ocr`)
   return res.data
 }

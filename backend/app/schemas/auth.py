@@ -30,6 +30,7 @@ class UserResponse(BaseModel):
     nickname: str
     role: str
     community_id: str
+    avatar_url: Optional[str] = None
 
     class Config:
         from_attributes = True

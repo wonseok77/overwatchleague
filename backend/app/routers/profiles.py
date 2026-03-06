@@ -189,6 +189,65 @@ def get_user_profile(user_id: uuid.UUID, db: Session = Depends(get_db)):
     )
 
 
+class ProfileUpdate(BaseModel):
+    nickname: Optional[str] = None
+    main_role: Optional[str] = None  # "tank" | "dps" | "support"
+    main_heroes: Optional[List[str]] = None
+
+
+class ProfileUpdateResponse(BaseModel):
+    nickname: Optional[str] = None
+    main_role: Optional[str] = None
+    main_heroes: Optional[List[str]] = None
+    current_rank: Optional[str] = None
+    mmr: Optional[int] = None
+
+
+@router.patch("/users/{user_id}/profile", response_model=ProfileUpdateResponse)
+def update_user_profile(
+    user_id: uuid.UUID,
+    req: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.id != user_id and current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    profile = db.query(PlayerProfile).filter(PlayerProfile.user_id == user_id).first()
+    if not profile:
+        profile = PlayerProfile(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            main_role=req.main_role or "dps",
+            mmr=1000,
+        )
+        db.add(profile)
+
+    if req.nickname is not None:
+        user.nickname = req.nickname
+
+    if req.main_role is not None:
+        profile.main_role = req.main_role
+    if req.main_heroes is not None:
+        profile.main_heroes = req.main_heroes
+
+    db.commit()
+    db.refresh(profile)
+    db.refresh(user)
+
+    return ProfileUpdateResponse(
+        nickname=user.nickname,
+        main_role=profile.main_role,
+        main_heroes=profile.main_heroes,
+        current_rank=profile.current_rank,
+        mmr=profile.mmr,
+    )
+
+
 class AvatarResponse(BaseModel):
     avatar_url: str
 
