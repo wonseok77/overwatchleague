@@ -50,12 +50,34 @@ export async function registerForSession(sessionId: string, data: {
   return res.data
 }
 
+export async function updateMyRegistration(sessionId: string, data: {
+  priority_1: string
+  priority_2?: string | null
+  priority_3?: string | null
+  min_games?: number
+  max_games?: number
+}): Promise<SessionRegistration> {
+  const res = await apiClient.patch(`/sessions/${sessionId}/register`, data)
+  return res.data
+}
+
 export async function cancelSessionRegistration(sessionId: string): Promise<void> {
   await apiClient.delete(`/sessions/${sessionId}/register`)
 }
 
 export async function getRegistrations(sessionId: string): Promise<SessionRegistration[]> {
   const res = await apiClient.get(`/sessions/${sessionId}/registrations`)
+  return res.data
+}
+
+export async function updateRegistration(sessionId: string, userId: string, data: {
+  priority_1: string
+  priority_2?: string | null
+  priority_3?: string | null
+  min_games?: number
+  max_games?: number
+}): Promise<SessionRegistration> {
+  const res = await apiClient.patch(`/sessions/${sessionId}/registrations/${userId}`, data)
   return res.data
 }
 

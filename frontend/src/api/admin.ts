@@ -45,6 +45,7 @@ export interface AdminMemberResponse {
   current_rank: string | null
   mmr: number | null
   position_ranks: PositionRankInfo[]
+  is_hidden: boolean
 }
 
 export interface AdminMemberUpdate {
@@ -111,13 +112,21 @@ export async function updateAdminMember(userId: string, data: AdminMemberUpdate)
   return res.data
 }
 
-export async function updateAdminMemberMMR(userId: string, positionRanks: AdminPositionRankUpdate[]): Promise<AdminMemberResponse> {
-  const res = await apiClient.patch(`/admin/members/${userId}/position-ranks`, { position_ranks: positionRanks })
+export async function updateAdminMemberMMR(userId: string, positionRanks: AdminPositionRankUpdate[], seasonId?: string): Promise<AdminMemberResponse> {
+  const res = await apiClient.patch(`/admin/members/${userId}/position-ranks`, {
+    position_ranks: positionRanks,
+    season_id: seasonId ?? null,
+  })
   return res.data
 }
 
 export async function deleteAdminMember(userId: string): Promise<void> {
   await apiClient.delete(`/admin/members/${userId}`)
+}
+
+export async function toggleMemberHidden(userId: string): Promise<{ is_hidden: boolean }> {
+  const res = await apiClient.patch(`/admin/members/${userId}/toggle-hidden`)
+  return res.data
 }
 
 // Webhook

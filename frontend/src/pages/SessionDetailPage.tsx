@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +17,8 @@ import {
   getSession,
   registerForSession,
   cancelSessionRegistration,
+  updateMyRegistration,
+  updateRegistration,
   getRegistrations,
   runMatchmaking,
   getMatchmakingPreview,
@@ -70,42 +72,47 @@ function PositionSelect({
   )
 }
 
-// score_diff → 색상 (0에 가까울수록 녹색, 클수록 빨간색)
+// MMR 차이 → 색상
 function scoreDiffColor(diff: number): string {
-  if (diff <= 0.5) return 'text-green-600'
-  if (diff <= 1.5) return 'text-yellow-600'
+  if (diff <= 20) return 'text-green-600'
+  if (diff <= 50) return 'text-yellow-600'
   return 'text-red-500'
 }
 
-function GameTeamTable({ players, teamLabel, teamScore }: {
+function GameTeamTable({ players, teamLabel, avgMmr }: {
   players: MatchmakingGame['team_a']
   teamLabel: string
-  teamScore: number
+  avgMmr: number
 }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold">{teamLabel}</span>
-        <span className="text-sm font-mono font-bold">{(teamScore ?? 0).toFixed(2)}</span>
+        <span className="text-sm font-mono font-bold">avg {avgMmr ?? 0}</span>
       </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="text-xs">닉네임</TableHead>
-            <TableHead className="text-xs">포지션</TableHead>
-            <TableHead className="text-xs">지망</TableHead>
-            <TableHead className="text-xs text-right">점수</TableHead>
+            <TableHead className="text-xs px-2">닉네임</TableHead>
+            <TableHead className="text-xs px-2">포지션</TableHead>
+            <TableHead className="text-xs px-2">지망</TableHead>
+            <TableHead className="text-xs px-2">티어</TableHead>
+            <TableHead className="text-xs px-2 text-right">MMR</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(players ?? []).map((p) => (
+          {[...(players ?? [])].sort((a, b) => {
+            const order: Record<string, number> = { tank: 0, dps: 1, support: 2 }
+            return (order[a.assigned_position] ?? 9) - (order[b.assigned_position] ?? 9)
+          }).map((p) => (
             <TableRow key={p.user_id}>
-              <TableCell className="text-sm font-medium">{p.nickname ?? '-'}</TableCell>
-              <TableCell>
-                <RoleBadge role={p.assigned_position as MainRole} showIcon={false} />
+              <TableCell className="text-xs font-medium py-1.5 px-2 truncate max-w-[120px]">{p.nickname ?? '-'}</TableCell>
+              <TableCell className="py-1.5 px-2">
+                <RoleBadge role={p.assigned_position as MainRole} showIcon={false} className="text-[10px] px-1.5" />
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">{p.priority_used}지망</TableCell>
-              <TableCell className="text-xs font-mono text-right">{(p.score ?? 0).toFixed(2)}</TableCell>
+              <TableCell className="text-xs text-muted-foreground py-1.5 px-2">{p.priority_used}지망</TableCell>
+              <TableCell className="py-1.5 px-2">{p.rank ? <RankBadge rank={p.rank} compact /> : '-'}</TableCell>
+              <TableCell className="text-xs font-mono text-right py-1.5 px-2">{p.mmr ?? '-'}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -176,12 +183,12 @@ function MatchmakingPreview({
             <TabsContent key={game.game_no} value={`game-${game.game_no}`} className="mt-4 space-y-4">
               {/* 밸런스 지표 */}
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-muted-foreground">점수 차이</span>
-                <span className={cn('font-mono font-bold', scoreDiffColor(game.score_diff ?? 0))}>
-                  {(game.score_diff ?? 0).toFixed(2)}
+                <span className="text-muted-foreground">평균 MMR 차이</span>
+                <span className={cn('font-mono font-bold', scoreDiffColor(game.mmr_diff ?? 0))}>
+                  {game.mmr_diff ?? 0}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  (A: {(game.team_a_score ?? 0).toFixed(2)} vs B: {(game.team_b_score ?? 0).toFixed(2)})
+                  (A: {game.team_a_avg_mmr ?? 0} vs B: {game.team_b_avg_mmr ?? 0})
                 </span>
               </div>
 
@@ -191,14 +198,14 @@ function MatchmakingPreview({
                   <GameTeamTable
                     players={game.team_a}
                     teamLabel="Team A"
-                    teamScore={game.team_a_score}
+                    avgMmr={game.team_a_avg_mmr}
                   />
                 </div>
                 <div className="rounded-lg border border-red-200 bg-red-50/30 p-4">
                   <GameTeamTable
                     players={game.team_b}
                     teamLabel="Team B"
-                    teamScore={game.team_b_score}
+                    avgMmr={game.team_b_avg_mmr}
                   />
                 </div>
               </div>
@@ -250,6 +257,10 @@ function MatchmakingPreview({
                           />
                         </div>
                         <span className="text-xs font-mono w-8 text-right">{ps.games_played}</span>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          1지망 {ps.priority_1_count ?? 0}회 · 2지망 {ps.priority_2_count ?? 0}회 · 3지망 {ps.priority_3_count ?? 0}회
+                          {(ps.forced_count ?? 0) > 0 && ` · 강제 ${ps.forced_count}회`}
+                        </span>
                       </div>
                     )
                   })}
@@ -264,6 +275,7 @@ function MatchmakingPreview({
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { user, isAdminOrManager } = useAuth()
 
   const [session, setSession] = useState<MatchSession | null>(null)
@@ -303,6 +315,28 @@ export default function SessionDetailPage() {
     support_count: 1,
   })
   const [savingEdit, setSavingEdit] = useState(false)
+
+  // 본인 신청 수정 (S1)
+  const [isEditingMyReg, setIsEditingMyReg] = useState(false)
+  const [editMyRegForm, setEditMyRegForm] = useState({
+    priority_1: '' as PositionType | '',
+    priority_2: '' as PositionType | '',
+    priority_3: '' as PositionType | '',
+    min_games: 1,
+    max_games: 999,
+  })
+  const [savingMyReg, setSavingMyReg] = useState(false)
+
+  // 관리자 인라인 수정 (S2)
+  const [editingRegId, setEditingRegId] = useState<string | null>(null)
+  const [editRegForm, setEditRegForm] = useState({
+    priority_1: '' as PositionType | '',
+    priority_2: '' as PositionType | '',
+    priority_3: '' as PositionType | '',
+    min_games: 1,
+    max_games: 999,
+  })
+  const [savingReg, setSavingReg] = useState(false)
 
   // 신청 폼
   const [priority1, setPriority1] = useState<PositionType | ''>('')
@@ -424,7 +458,13 @@ export default function SessionDetailPage() {
         max_games: maxGames,
       })
       await loadData()
-    } catch {
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
+      if (axiosErr.response?.status === 422) {
+        alert('시즌 포지션 랭크가 설정되지 않았습니다.\n프로필 페이지에서 먼저 설정해주세요.')
+        navigate('/profile/me')
+        return
+      }
       alert('신청에 실패했습니다. 다시 시도해주세요.')
     } finally {
       setSubmitting(false)
@@ -442,6 +482,69 @@ export default function SessionDetailPage() {
       alert('취소에 실패했습니다. 다시 시도해주세요.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleStartEditMyReg = () => {
+    if (!myRegistration) return
+    setEditMyRegForm({
+      priority_1: myRegistration.priority_1 as PositionType,
+      priority_2: (myRegistration.priority_2 ?? '') as PositionType | '',
+      priority_3: (myRegistration.priority_3 ?? '') as PositionType | '',
+      min_games: myRegistration.min_games,
+      max_games: myRegistration.max_games,
+    })
+    setIsEditingMyReg(true)
+  }
+
+  const handleSaveMyReg = async () => {
+    if (!id || !editMyRegForm.priority_1) return
+    setSavingMyReg(true)
+    try {
+      await updateMyRegistration(id, {
+        priority_1: editMyRegForm.priority_1,
+        priority_2: editMyRegForm.priority_2 || null,
+        priority_3: editMyRegForm.priority_3 || null,
+        min_games: editMyRegForm.min_games,
+        max_games: editMyRegForm.max_games,
+      })
+      setIsEditingMyReg(false)
+      await loadData()
+    } catch {
+      alert('수정에 실패했습니다.')
+    } finally {
+      setSavingMyReg(false)
+    }
+  }
+
+  const handleStartEditReg = (reg: SessionRegistration) => {
+    setEditRegForm({
+      priority_1: reg.priority_1 as PositionType,
+      priority_2: (reg.priority_2 ?? '') as PositionType | '',
+      priority_3: (reg.priority_3 ?? '') as PositionType | '',
+      min_games: reg.min_games,
+      max_games: reg.max_games,
+    })
+    setEditingRegId(reg.user_id)
+  }
+
+  const handleSaveEditReg = async () => {
+    if (!id || !editingRegId || !editRegForm.priority_1) return
+    setSavingReg(true)
+    try {
+      await updateRegistration(id, editingRegId, {
+        priority_1: editRegForm.priority_1,
+        priority_2: editRegForm.priority_2 || null,
+        priority_3: editRegForm.priority_3 || null,
+        min_games: editRegForm.min_games,
+        max_games: editRegForm.max_games,
+      })
+      setEditingRegId(null)
+      await loadData()
+    } catch {
+      alert('수정에 실패했습니다.')
+    } finally {
+      setSavingReg(false)
     }
   }
 
@@ -566,35 +669,115 @@ export default function SessionDetailPage() {
             </CardHeader>
             <CardContent>
               {myRegistration ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">1지망</span>
-                      <p className="font-medium">{POSITION_LABELS[myRegistration.priority_1] ?? myRegistration.priority_1}</p>
+                isEditingMyReg ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="space-y-1.5">
+                        <Label>1지망 포지션 *</Label>
+                        <PositionSelect
+                          value={editMyRegForm.priority_1}
+                          onChange={(v) => {
+                            setEditMyRegForm((prev) => ({
+                              ...prev,
+                              priority_1: v,
+                              priority_2: prev.priority_2 === v ? '' : prev.priority_2,
+                              priority_3: prev.priority_3 === v ? '' : prev.priority_3,
+                            }))
+                          }}
+                          placeholder="선택하세요"
+                          excludeValues={[editMyRegForm.priority_2, editMyRegForm.priority_3]}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>2지망 포지션</Label>
+                        <PositionSelect
+                          value={editMyRegForm.priority_2}
+                          onChange={(v) => {
+                            setEditMyRegForm((prev) => ({
+                              ...prev,
+                              priority_2: v,
+                              priority_3: prev.priority_3 === v ? '' : prev.priority_3,
+                            }))
+                          }}
+                          placeholder="선택 안 함"
+                          excludeValues={[editMyRegForm.priority_1, editMyRegForm.priority_3]}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>3지망 포지션</Label>
+                        <PositionSelect
+                          value={editMyRegForm.priority_3}
+                          onChange={(v) => setEditMyRegForm((prev) => ({ ...prev, priority_3: v }))}
+                          placeholder="선택 안 함"
+                          excludeValues={[editMyRegForm.priority_1, editMyRegForm.priority_2]}
+                        />
+                      </div>
                     </div>
-                    {myRegistration.priority_2 && (
-                      <div>
-                        <span className="text-muted-foreground">2지망</span>
-                        <p className="font-medium">{POSITION_LABELS[myRegistration.priority_2] ?? myRegistration.priority_2}</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label>최소 참여 게임 수</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={editMyRegForm.min_games}
+                          onChange={(e) => setEditMyRegForm((prev) => ({ ...prev, min_games: Number(e.target.value) }))}
+                        />
                       </div>
-                    )}
-                    {myRegistration.priority_3 && (
-                      <div>
-                        <span className="text-muted-foreground">3지망</span>
-                        <p className="font-medium">{POSITION_LABELS[myRegistration.priority_3] ?? myRegistration.priority_3}</p>
+                      <div className="space-y-1.5">
+                        <Label>최대 참여 게임 수</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={editMyRegForm.max_games}
+                          onChange={(e) => setEditMyRegForm((prev) => ({ ...prev, max_games: Number(e.target.value) }))}
+                        />
                       </div>
-                    )}
-                    <div>
-                      <span className="text-muted-foreground">참여 게임 수</span>
-                      <p className="font-medium">
-                        {myRegistration.min_games} ~ {myRegistration.max_games === 999 ? '무제한' : myRegistration.max_games}
-                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={handleSaveMyReg} disabled={savingMyReg || !editMyRegForm.priority_1} size="sm">
+                        {savingMyReg ? '저장 중...' : '저장'}
+                      </Button>
+                      <Button variant="outline" onClick={() => setIsEditingMyReg(false)} size="sm">
+                        취소
+                      </Button>
                     </div>
                   </div>
-                  <Button variant="destructive" onClick={handleCancel} disabled={submitting} size="sm">
-                    {submitting ? '처리 중...' : '참가 취소'}
-                  </Button>
-                </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">1지망</span>
+                        <p className="font-medium">{POSITION_LABELS[myRegistration.priority_1] ?? myRegistration.priority_1}</p>
+                      </div>
+                      {myRegistration.priority_2 && (
+                        <div>
+                          <span className="text-muted-foreground">2지망</span>
+                          <p className="font-medium">{POSITION_LABELS[myRegistration.priority_2] ?? myRegistration.priority_2}</p>
+                        </div>
+                      )}
+                      {myRegistration.priority_3 && (
+                        <div>
+                          <span className="text-muted-foreground">3지망</span>
+                          <p className="font-medium">{POSITION_LABELS[myRegistration.priority_3] ?? myRegistration.priority_3}</p>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground">참여 게임 수</span>
+                        <p className="font-medium">
+                          {myRegistration.min_games} ~ {myRegistration.max_games === 999 ? '무제한' : myRegistration.max_games}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={handleStartEditMyReg} size="sm">
+                        수정
+                      </Button>
+                      <Button variant="destructive" onClick={handleCancel} disabled={submitting} size="sm">
+                        {submitting ? '처리 중...' : '참가 취소'}
+                      </Button>
+                    </div>
+                  </div>
+                )
               ) : (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -695,36 +878,132 @@ export default function SessionDetailPage() {
                         <TableHead>최소</TableHead>
                         <TableHead>최대</TableHead>
                         <TableHead>티어</TableHead>
+                        {isOpen && <TableHead className="w-20">액션</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {registrations.map((reg) => (
-                        <TableRow key={reg.id}>
-                          <TableCell className="font-medium">{reg.nickname ?? '-'}</TableCell>
-                          <TableCell>{POSITION_LABELS[reg.priority_1] ?? reg.priority_1}</TableCell>
-                          <TableCell>{reg.priority_2 ? (POSITION_LABELS[reg.priority_2] ?? reg.priority_2) : '-'}</TableCell>
-                          <TableCell>{reg.priority_3 ? (POSITION_LABELS[reg.priority_3] ?? reg.priority_3) : '-'}</TableCell>
-                          <TableCell>{reg.min_games}</TableCell>
-                          <TableCell>{reg.max_games === 999 ? '무제한' : reg.max_games}</TableCell>
-                          <TableCell>
-                            {reg.position_ranks && reg.position_ranks.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {reg.position_ranks.map((pr) => (
-                                  <div key={pr.position} className="flex items-center gap-1 text-xs">
-                                    <span className="text-muted-foreground w-7 shrink-0">{POSITION_LABELS[pr.position]}</span>
-                                    <RankBadge rank={pr.rank} />
-                                    {pr.mmr != null && <span className="text-muted-foreground">({pr.mmr})</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : reg.current_rank ? (
-                              <RankBadge rank={reg.current_rank} />
+                      {registrations.map((reg) => {
+                        const isEditing = editingRegId === reg.user_id
+                        return (
+                          <TableRow key={reg.id}>
+                            <TableCell className="font-medium">{reg.nickname ?? '-'}</TableCell>
+                            {isEditing ? (
+                              <>
+                                <TableCell>
+                                  <PositionSelect
+                                    value={editRegForm.priority_1}
+                                    onChange={(v) => setEditRegForm((prev) => ({
+                                      ...prev,
+                                      priority_1: v,
+                                      priority_2: prev.priority_2 === v ? '' : prev.priority_2,
+                                      priority_3: prev.priority_3 === v ? '' : prev.priority_3,
+                                    }))}
+                                    placeholder="선택"
+                                    excludeValues={[editRegForm.priority_2, editRegForm.priority_3]}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <PositionSelect
+                                    value={editRegForm.priority_2}
+                                    onChange={(v) => setEditRegForm((prev) => ({
+                                      ...prev,
+                                      priority_2: v,
+                                      priority_3: prev.priority_3 === v ? '' : prev.priority_3,
+                                    }))}
+                                    placeholder="-"
+                                    excludeValues={[editRegForm.priority_1, editRegForm.priority_3]}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <PositionSelect
+                                    value={editRegForm.priority_3}
+                                    onChange={(v) => setEditRegForm((prev) => ({ ...prev, priority_3: v }))}
+                                    placeholder="-"
+                                    excludeValues={[editRegForm.priority_1, editRegForm.priority_2]}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    className="w-16 h-8"
+                                    value={editRegForm.min_games}
+                                    onChange={(e) => setEditRegForm((prev) => ({ ...prev, min_games: Number(e.target.value) }))}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    className="w-16 h-8"
+                                    value={editRegForm.max_games}
+                                    onChange={(e) => setEditRegForm((prev) => ({ ...prev, max_games: Number(e.target.value) }))}
+                                  />
+                                </TableCell>
+                              </>
                             ) : (
-                              <span className="text-muted-foreground text-xs">미입력</span>
+                              <>
+                                <TableCell>{POSITION_LABELS[reg.priority_1] ?? reg.priority_1}</TableCell>
+                                <TableCell>{reg.priority_2 ? (POSITION_LABELS[reg.priority_2] ?? reg.priority_2) : '-'}</TableCell>
+                                <TableCell>{reg.priority_3 ? (POSITION_LABELS[reg.priority_3] ?? reg.priority_3) : '-'}</TableCell>
+                                <TableCell>{reg.min_games}</TableCell>
+                                <TableCell>{reg.max_games === 999 ? '무제한' : reg.max_games}</TableCell>
+                              </>
                             )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            <TableCell>
+                              {reg.position_ranks && reg.position_ranks.length > 0 ? (
+                                <div className="space-y-0.5">
+                                  {reg.position_ranks.map((pr) => (
+                                    <div key={pr.position} className="flex items-center gap-1 text-xs">
+                                      <span className="text-muted-foreground w-7 shrink-0">{POSITION_LABELS[pr.position]}</span>
+                                      <RankBadge rank={pr.rank} />
+                                      {pr.mmr != null && <span className="text-muted-foreground">({pr.mmr})</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : reg.current_rank ? (
+                                <RankBadge rank={reg.current_rank} />
+                              ) : (
+                                <span className="text-muted-foreground text-xs">미입력</span>
+                              )}
+                            </TableCell>
+                            {isOpen && (
+                              <TableCell>
+                                {isEditing ? (
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={handleSaveEditReg}
+                                      disabled={savingReg || !editRegForm.priority_1}
+                                    >
+                                      ✓
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => setEditingRegId(null)}
+                                    >
+                                      ✕
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0"
+                                    onClick={() => handleStartEditReg(reg)}
+                                  >
+                                    ✎
+                                  </Button>
+                                )}
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 )}

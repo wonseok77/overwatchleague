@@ -217,6 +217,18 @@ def register_for_session(
     if existing:
         raise HTTPException(status_code=400, detail="Already registered for this session")
 
+    # 시즌 랭크 설정 여부 확인
+    if session.season_id:
+        season_ranks = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == current_user.id,
+            PlayerPositionRank.season_id == session.season_id,
+        ).all()
+        if not season_ranks:
+            raise HTTPException(
+                status_code=422,
+                detail="시즌 포지션 랭크가 설정되지 않았습니다. 프로필에서 현재 시즌의 포지션별 랭크를 먼저 설정해주세요."
+            )
+
     reg = SessionRegistration(
         id=uuid.uuid4(),
         session_id=session_id,
@@ -271,6 +283,18 @@ def admin_register_member(
     if existing:
         raise HTTPException(status_code=400, detail="User is already registered for this session")
 
+    # 시즌 랭크 설정 여부 확인 (관리자 대리 등록도 차단)
+    if session.season_id:
+        season_ranks = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == target_user.id,
+            PlayerPositionRank.season_id == session.season_id,
+        ).all()
+        if not season_ranks:
+            raise HTTPException(
+                status_code=422,
+                detail="해당 멤버의 시즌 포지션 랭크가 설정되지 않았습니다. 프로필에서 현재 시즌의 포지션별 랭크를 먼저 설정해주세요."
+            )
+
     reg = SessionRegistration(
         id=uuid.uuid4(),
         session_id=session_id,
@@ -285,6 +309,35 @@ def admin_register_member(
     db.commit()
     db.refresh(reg)
     return _registration_response(reg, nickname=target_user.nickname)
+
+
+@router.patch("/sessions/{session_id}/register", response_model=SessionRegistrationResponse)
+def update_my_registration(
+    session_id: uuid.UUID,
+    body: SessionRegistrationCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = db.query(MatchSession).filter(MatchSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status != "open":
+        raise HTTPException(status_code=400, detail="Session is not open")
+    reg = db.query(SessionRegistration).filter(
+        SessionRegistration.session_id == session_id,
+        SessionRegistration.user_id == current_user.id,
+        SessionRegistration.status != "cancelled",
+    ).first()
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    reg.priority_1 = body.priority_1
+    reg.priority_2 = body.priority_2
+    reg.priority_3 = body.priority_3
+    reg.min_games = body.min_games
+    reg.max_games = body.max_games
+    db.commit()
+    db.refresh(reg)
+    return _registration_response(reg, nickname=current_user.nickname)
 
 
 @router.delete("/sessions/{session_id}/register")
@@ -332,7 +385,7 @@ def list_registrations(
     profiles = {p.user_id: p for p in db.query(PlayerProfile).filter(PlayerProfile.user_id.in_(user_ids)).all()}
     pos_ranks_all = db.query(PlayerPositionRank).filter(
         PlayerPositionRank.user_id.in_(user_ids),
-        PlayerPositionRank.season_id.is_(None),
+        PlayerPositionRank.season_id == session.season_id if session.season_id else PlayerPositionRank.season_id.is_(None),
     ).all()
     pos_ranks_map: Dict[Any, List[PositionRankInfo]] = {}
     for pr in pos_ranks_all:
@@ -392,17 +445,28 @@ class MatchmakeRequest(BaseModel):
     pass
 
 
-def _build_registration_inputs(db: Session, registrations: List[SessionRegistration]) -> List[RegistrationInput]:
+def _build_registration_inputs(db: Session, registrations: List[SessionRegistration], season_id: uuid.UUID = None) -> List[RegistrationInput]:
     user_ids = [r.user_id for r in registrations]
     users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()}
     profiles = {p.user_id: p for p in db.query(PlayerProfile).filter(PlayerProfile.user_id.in_(user_ids)).all()}
     position_ranks_all = db.query(PlayerPositionRank).filter(
         PlayerPositionRank.user_id.in_(user_ids),
-        PlayerPositionRank.season_id.is_(None),
+        PlayerPositionRank.season_id == season_id if season_id else PlayerPositionRank.season_id.is_(None),
     ).all()
     pos_ranks_map: dict = {}
     for pr in position_ranks_all:
         pos_ranks_map.setdefault(pr.user_id, {})[pr.position] = {"rank": pr.rank, "mmr": pr.mmr}
+
+    # season_id 데이터가 없는 유저는 global(NULL) 데이터로 폴백
+    if season_id:
+        missing_users = [uid for uid in user_ids if uid not in pos_ranks_map]
+        if missing_users:
+            fallback_ranks = db.query(PlayerPositionRank).filter(
+                PlayerPositionRank.user_id.in_(missing_users),
+                PlayerPositionRank.season_id.is_(None),
+            ).all()
+            for pr in fallback_ranks:
+                pos_ranks_map.setdefault(pr.user_id, {})[pr.position] = {"rank": pr.rank, "mmr": pr.mmr}
 
     result = []
     for reg in registrations:
@@ -436,31 +500,32 @@ def _format_matchmaking_result(
     formatted_games = []
     for game in raw.get("games", []):
         balance = game.get("balance_summary", {})
+        def _format_player(p):
+            reg = reg_map.get(p["user_id"])
+            pos = p["assigned_position"]
+            pos_info = reg.position_ranks.get(pos, {}) if reg else {}
+            pos_mmr = p["balance_score"]
+            pos_rank = pos_info.get("rank") or (reg.current_rank if reg else None)
+            return {
+                "user_id": p["user_id"],
+                "nickname": p["nickname"],
+                "assigned_position": p["assigned_position"],
+                "priority_used": p["priority_used"],
+                "score": p["balance_score"],
+                "mmr": pos_mmr,
+                "rank": pos_rank,
+            }
+
         formatted_game = {
             "game_no": game["game_no"],
-            "team_a": [
-                {
-                    "user_id": p["user_id"],
-                    "nickname": p["nickname"],
-                    "assigned_position": p["assigned_position"],
-                    "priority_used": p["priority_used"],
-                    "score": p["balance_score"],
-                }
-                for p in game.get("team_a", [])
-            ],
-            "team_b": [
-                {
-                    "user_id": p["user_id"],
-                    "nickname": p["nickname"],
-                    "assigned_position": p["assigned_position"],
-                    "priority_used": p["priority_used"],
-                    "score": p["balance_score"],
-                }
-                for p in game.get("team_b", [])
-            ],
+            "team_a": [_format_player(p) for p in game.get("team_a", [])],
+            "team_b": [_format_player(p) for p in game.get("team_b", [])],
             "team_a_score": balance.get("team_a_score", 0),
             "team_b_score": balance.get("team_b_score", 0),
             "score_diff": balance.get("score_diff", 0),
+            "team_a_avg_mmr": balance.get("team_a_avg_mmr", 0),
+            "team_b_avg_mmr": balance.get("team_b_avg_mmr", 0),
+            "mmr_diff": balance.get("mmr_diff", 0),
         }
         formatted_games.append(formatted_game)
 
@@ -475,13 +540,19 @@ def _format_matchmaking_result(
         })
 
     # player_game_counts (dict) -> player_stats (list of objects)
+    priority_counts = raw.get("priority_counts", {})
     player_stats = []
     for uid, count in raw.get("player_game_counts", {}).items():
         reg = reg_map.get(uid)
+        prio = priority_counts.get(uid, {})
         player_stats.append({
             "user_id": uid,
             "nickname": reg.nickname if reg else "Unknown",
             "games_played": count,
+            "priority_1_count": prio.get(1, 0),
+            "priority_2_count": prio.get(2, 0),
+            "priority_3_count": prio.get(3, 0),
+            "forced_count": prio.get(0, 0),
         })
 
     return {
@@ -510,7 +581,7 @@ def matchmake(
         SessionRegistration.status == "registered",
     ).all()
 
-    reg_inputs = _build_registration_inputs(db, regs)
+    reg_inputs = _build_registration_inputs(db, regs, session.season_id)
 
     config = SessionConfig(
         session_id=str(session.id),

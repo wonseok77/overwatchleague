@@ -15,7 +15,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { getUserProfile, uploadAvatar, updateProfile } from '@/api/members'
 import { getHeroes, type Hero } from '@/api/heroes'
 import { getCommunityHighlights } from '@/api/matches'
-import { getCurrentRanks, getSeasonRanks, setUserRanks } from '@/api/ranks'
+import { getSeasonRanks, setUserRanks } from '@/api/ranks'
 import { getSeasons } from '@/api/seasons'
 import type { ProfileResponse } from '@/api/members'
 import type { Season } from '@/types'
@@ -91,24 +91,25 @@ export default function ProfilePage() {
           .catch(() => {})
       : Promise.resolve()
 
-    const loadRanks = getCurrentRanks(uid)
-      .then((ranks) => {
-        setPositionRanks(ranks)
-        const rankMap: Record<PositionType, string> = { tank: '', dps: '', support: '' }
-        ranks.forEach((r) => { rankMap[r.position] = r.rank })
-        setDraftRanks(rankMap)
-      })
-      .catch(() => {})
-
     const loadSeasons = communityId
       ? getSeasons(communityId)
           .then((list) => {
             setSeasons(list)
+            const active = list.find(s => s.status === 'active')
+            if (active) {
+              setSelectedSeasonId(active.id)
+              return getSeasonRanks(uid, active.id).then((ranks) => {
+                setPositionRanks(ranks)
+                const rankMap: Record<PositionType, string> = { tank: '', dps: '', support: '' }
+                ranks.forEach((r) => { rankMap[r.position] = r.rank })
+                setDraftRanks(rankMap)
+              })
+            }
           })
           .catch(() => {})
       : Promise.resolve()
 
-    Promise.all([loadProfile, loadHighlights, loadRanks, loadSeasons]).finally(() => setLoading(false))
+    Promise.all([loadProfile, loadHighlights, loadSeasons]).finally(() => setLoading(false))
   }
 
   useEffect(() => {
@@ -185,12 +186,10 @@ export default function ProfilePage() {
   const handleSeasonChange = async (seasonId: string | null) => {
     setSelectedSeasonId(seasonId)
     setEditingRanks(false)
-    if (!userId) return
+    if (!userId || !seasonId) return
     setSeasonRanksLoading(true)
     try {
-      const ranks = seasonId
-        ? await getSeasonRanks(userId, seasonId)
-        : await getCurrentRanks(userId)
+      const ranks = await getSeasonRanks(userId, seasonId)
       setPositionRanks(ranks)
       const rankMap: Record<PositionType, string> = { tank: '', dps: '', support: '' }
       ranks.forEach((r) => { rankMap[r.position] = r.rank })
@@ -532,7 +531,6 @@ export default function ProfilePage() {
                     aria-label="시즌 선택"
                     disabled={editingRanks || seasonRanksLoading}
                   >
-                    <option value="">현재</option>
                     {seasons.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}

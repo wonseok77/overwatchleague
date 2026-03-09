@@ -11,9 +11,10 @@ import { getSeasons } from '@/api/seasons'
 import { getLeaderboard, type LeaderboardEntry } from '@/api/leaderboard'
 import { getHeroes, type Hero } from '@/api/heroes'
 import type { Season, MainRole } from '@/types'
+import { RankBadge as TierBadge } from '@/components/RankBadge'
 import { Trophy } from 'lucide-react'
 
-function RankBadge({ rank }: { rank: number }) {
+function RankNumber({ rank }: { rank: number }) {
   if (rank === 1) {
     return (
       <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-yellow-100 text-sm font-bold text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
@@ -60,23 +61,12 @@ function HeroPortrait({ hero, heroMap }: { hero: string; heroMap: Map<string, He
   )
 }
 
-const TIER_COLORS: Record<string, string> = {
-  Champion: 'text-pink-500',
-  Grandmaster: 'text-purple-600',
-  Master: 'text-lime-500',
-  Diamond: 'text-blue-500',
-  Platinum: 'text-teal-500',
-  Gold: 'text-yellow-600',
-  Silver: 'text-gray-400',
-  Bronze: 'text-amber-800',
-}
-
 export default function LeaderboardPage() {
   const { user } = useAuth()
   const [seasons, setSeasons] = useState<Season[]>([])
   const [selectedSeason, setSelectedSeason] = useState('')
   const [players, setPlayers] = useState<LeaderboardEntry[]>([])
-  const [roleFilter, setRoleFilter] = useState('all')
+  const [roleFilter, setRoleFilter] = useState('tank')
   const [heroMap, setHeroMap] = useState<Map<string, Hero>>(new Map())
   const [loading, setLoading] = useState(false)
 
@@ -126,17 +116,13 @@ export default function LeaderboardPage() {
     return pr?.mmr ?? null
   }
 
-  const filtered =
-    roleFilter === 'all'
-      ? players
-      : players.filter((p) => getPositionMmr(p, roleFilter) != null)
+  const filtered = players.filter((p) => getPositionMmr(p, roleFilter) != null)
 
   const sorted = [...filtered].sort((a, b) => {
-    if (roleFilter === 'all') return (b.mmr ?? 0) - (a.mmr ?? 0)
     return (getPositionMmr(b, roleFilter) ?? 0) - (getPositionMmr(a, roleFilter) ?? 0)
   })
 
-  const selectedSeasonName = seasons.find((s) => s.id === selectedSeason)?.name ?? '현재'
+  const selectedSeasonName = seasons.find((s) => s.id === selectedSeason)?.name ?? ''
 
   return (
     <Layout>
@@ -158,7 +144,6 @@ export default function LeaderboardPage() {
               className="w-48"
               aria-label="시즌 선택"
             >
-              <option value="">전체 (현재)</option>
               {seasons.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -170,7 +155,6 @@ export default function LeaderboardPage() {
 
         <Tabs value={roleFilter} onValueChange={setRoleFilter}>
           <TabsList>
-            <TabsTrigger value="all">전체</TabsTrigger>
             <TabsTrigger value="tank">Tank</TabsTrigger>
             <TabsTrigger value="dps">DPS</TabsTrigger>
             <TabsTrigger value="support">Support</TabsTrigger>
@@ -197,9 +181,7 @@ export default function LeaderboardPage() {
                       <TableHead className="hidden sm:table-cell font-semibold">본명</TableHead>
                       <TableHead className="font-semibold">역할군</TableHead>
                       <TableHead className="hidden md:table-cell font-semibold">주 영웅</TableHead>
-                      {roleFilter !== 'all' && (
-                        <TableHead className="text-center font-semibold">티어</TableHead>
-                      )}
+                      <TableHead className="text-center font-semibold">티어</TableHead>
                       <TableHead className="text-right font-semibold">MMR</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -210,7 +192,7 @@ export default function LeaderboardPage() {
                         className={i < 3 ? 'bg-muted/20 hover:bg-muted/40' : 'hover:bg-muted/20'}
                       >
                         <TableCell className="text-center">
-                          <RankBadge rank={i + 1} />
+                          <RankNumber rank={i + 1} />
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
@@ -231,9 +213,7 @@ export default function LeaderboardPage() {
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           {(() => {
-                            const displayHeroes = roleFilter === 'all'
-                              ? (p.main_heroes ?? []).slice(0, 3)
-                              : (p.main_heroes ?? []).filter((h) => heroMap.get(h)?.role === roleFilter).slice(0, 3)
+                            const displayHeroes = (p.main_heroes ?? []).filter((h) => heroMap.get(h)?.role === roleFilter).slice(0, 3)
                             return displayHeroes.length > 0 ? (
                               <div className="flex items-center gap-1">
                                 {displayHeroes.map((hero) => (
@@ -245,23 +225,19 @@ export default function LeaderboardPage() {
                             )
                           })()}
                         </TableCell>
-                        {roleFilter !== 'all' && (() => {
+                        {(() => {
                           const pr = p.position_ranks.find((r) => r.position === roleFilter)
                           return (
                             <TableCell className="text-center">
-                              {pr ? (
-                                <span className={`text-sm font-semibold ${TIER_COLORS[pr.rank?.split(' ')[0]] ?? 'text-muted-foreground'}`}>
-                                  {pr.rank}
-                                </span>
+                              {pr?.rank ? (
+                                <TierBadge rank={pr.rank} />
                               ) : '-'}
                             </TableCell>
                           )
                         })()}
                         <TableCell className="text-right">
                           <span className="tabular-nums font-semibold">
-                            {roleFilter === 'all'
-                              ? (p.mmr ?? 1000)
-                              : (getPositionMmr(p, roleFilter) ?? '-')}
+                            {getPositionMmr(p, roleFilter) ?? '-'}
                           </span>
                         </TableCell>
                       </TableRow>

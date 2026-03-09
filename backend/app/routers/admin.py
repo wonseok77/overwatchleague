@@ -71,6 +71,7 @@ class AdminMemberResponse(BaseModel):
     current_rank: Optional[str] = None
     mmr: Optional[int] = None
     position_ranks: List[PositionRankInfo] = []
+    is_hidden: bool = False
 
     class Config:
         from_attributes = True
@@ -92,6 +93,7 @@ class AdminPositionRankUpdate(BaseModel):
 
 class AdminPositionRanksUpdate(BaseModel):
     position_ranks: List[AdminPositionRankUpdate]
+    season_id: Optional[str] = None
 
 
 class WebhookUpdate(BaseModel):
@@ -120,7 +122,7 @@ def _season_response(s: Season) -> AdminSeasonResponse:
     )
 
 
-def _member_response(user: User) -> AdminMemberResponse:
+def _member_response(user: User, active_season_id=None) -> AdminMemberResponse:
     profile = user.profile
     position_ranks_data = [
         PositionRankInfo(
@@ -129,7 +131,7 @@ def _member_response(user: User) -> AdminMemberResponse:
             mmr=pr.mmr,
         )
         for pr in (user.position_ranks if hasattr(user, 'position_ranks') and user.position_ranks else [])
-        if pr.season_id is None  # 시즌 미지정 = 현재 전역 랭크
+        if pr.season_id == active_season_id
     ]
     return AdminMemberResponse(
         user_id=str(user.id),
@@ -142,6 +144,7 @@ def _member_response(user: User) -> AdminMemberResponse:
         current_rank=profile.current_rank if profile else None,
         mmr=profile.mmr if profile else None,
         position_ranks=position_ranks_data,
+        is_hidden=user.is_hidden,
     )
 
 
@@ -318,9 +321,18 @@ def finalize_season(
 
 @router.get("/members", response_model=List[AdminMemberResponse])
 def list_members(
+    season_id: Optional[str] = None,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    # season_id 미전달 시 활성 시즌 자동 조회
+    sid = uuid.UUID(season_id) if season_id else None
+    if not sid:
+        active = db.query(Season).filter(
+            Season.community_id == admin.community_id, Season.status == "active"
+        ).first()
+        sid = active.id if active else None
+
     users = (
         db.query(User)
         .options(joinedload(User.profile), joinedload(User.position_ranks))
@@ -334,7 +346,7 @@ def list_members(
         if u.id not in seen:
             seen.add(u.id)
             unique_users.append(u)
-    return [_member_response(u) for u in unique_users]
+    return [_member_response(u, active_season_id=sid) for u in unique_users]
 
 
 @router.patch("/members/{user_id}", response_model=AdminMemberResponse)
@@ -383,7 +395,11 @@ def update_member(
 
     db.commit()
     db.refresh(user)
-    return _member_response(user)
+    # 활성 시즌 조회하여 _member_response에 전달
+    active = db.query(Season).filter(
+        Season.community_id == admin.community_id, Season.status == "active"
+    ).first()
+    return _member_response(user, active_season_id=active.id if active else None)
 
 
 @router.delete("/members/{user_id}")
@@ -412,15 +428,18 @@ def delete_member(
     return {"message": "Member deleted"}
 
 
-# --- Admin MMR Edit ---
-
-class AdminPositionRankUpdate(BaseModel):
-    position: str  # "tank" | "dps" | "support"
-    mmr: int
-
-
-class AdminPositionRanksUpdate(BaseModel):
-    position_ranks: List[AdminPositionRankUpdate]
+@router.patch("/members/{user_id}/toggle-hidden")
+def toggle_member_hidden(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id, User.community_id == admin.community_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.is_hidden = not user.is_hidden
+    db.commit()
+    return {"is_hidden": user.is_hidden}
 
 
 @router.patch("/members/{user_id}/position-ranks", response_model=AdminMemberResponse)
@@ -441,10 +460,18 @@ def update_member_position_ranks(
     if user.community_id != admin.community_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
 
+    # season_id 결정: 요청값 > 활성 시즌
+    sid = uuid.UUID(req.season_id) if req.season_id else None
+    if not sid:
+        active = db.query(Season).filter(
+            Season.community_id == admin.community_id, Season.status == "active"
+        ).first()
+        sid = active.id if active else None
+
     for item in req.position_ranks:
         existing = db.query(PlayerPositionRank).filter(
             PlayerPositionRank.user_id == user_id,
-            PlayerPositionRank.season_id.is_(None),
+            PlayerPositionRank.season_id == sid if sid else PlayerPositionRank.season_id.is_(None),
             PlayerPositionRank.position == item.position,
         ).first()
         rank_str = mmr_to_rank(item.mmr)
@@ -456,7 +483,7 @@ def update_member_position_ranks(
             new_rank = PlayerPositionRank(
                 id=uuid.uuid4(),
                 user_id=user_id,
-                season_id=None,
+                season_id=sid,
                 position=item.position,
                 rank=rank_str,
                 mmr=item.mmr,
@@ -465,54 +492,7 @@ def update_member_position_ranks(
 
     db.commit()
     db.refresh(user)
-    return _member_response(user)
-
-
-# --- Admin MMR Edit ---
-
-@router.patch("/members/{user_id}/position-ranks", response_model=AdminMemberResponse)
-def update_member_position_ranks(
-    user_id: uuid.UUID,
-    req: AdminPositionRanksUpdate,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    user = (
-        db.query(User)
-        .options(joinedload(User.profile), joinedload(User.position_ranks))
-        .filter(User.id == user_id)
-        .first()
-    )
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.community_id != admin.community_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your community")
-
-    for item in req.position_ranks:
-        existing = db.query(PlayerPositionRank).filter(
-            PlayerPositionRank.user_id == user_id,
-            PlayerPositionRank.season_id.is_(None),
-            PlayerPositionRank.position == item.position,
-        ).first()
-        rank_str = mmr_to_rank(item.mmr)
-        if existing:
-            existing.mmr = item.mmr
-            existing.rank = rank_str
-            existing.updated_at = datetime.utcnow()
-        else:
-            new_rank = PlayerPositionRank(
-                id=uuid.uuid4(),
-                user_id=user_id,
-                season_id=None,
-                position=item.position,
-                rank=rank_str,
-                mmr=item.mmr,
-            )
-            db.add(new_rank)
-
-    db.commit()
-    db.refresh(user)
-    return _member_response(user)
+    return _member_response(user, active_season_id=sid)
 
 
 # --- Webhook ---

@@ -43,7 +43,7 @@ def get_leaderboard(
     users = (
         db.query(User)
         .options(joinedload(User.profile), joinedload(User.position_ranks))
-        .filter(User.community_id == community_id)
+        .filter(User.community_id == community_id, User.is_hidden == False)
         .all()
     )
 
@@ -108,7 +108,7 @@ def _build_member_response(user: User) -> MemberResponse:
 
 @router.get("/{community_id}/members", response_model=List[MemberResponse])
 def list_members(community_id: uuid.UUID, db: Session = Depends(get_db)):
-    users = db.query(User).filter(User.community_id == community_id).all()
+    users = db.query(User).filter(User.community_id == community_id, User.is_hidden == False).all()
     return [_build_member_response(u) for u in users]
 
 

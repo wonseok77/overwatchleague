@@ -53,7 +53,25 @@
       "Bash(source ~/.zshrc)",
       "Bash(docker compose up --build -d 2>&1)",
       "Bash(docker compose ps)",
-      "Bash(docker compose up --build -d)"
+      "Bash(docker compose up --build -d)",
+      "Bash(grep -r \"bronze\\\\|silver\\\\|gold\\\\|platinum\\\\|diamond\\\\|master\\\\|grandmaster\\\\|champion\" /Users/wonseok/Desktop/ow-league/frontend/src --include=\"*.tsx\" --include=\"*.ts\" 2>/dev/null | head -20)",
+      "Bash(docker compose exec db psql -U postgres -d overwatchleague -c \"SELECT id, email, nickname, current_rank FROM users WHERE nickname LIKE '%우봉%' OR nickname LIKE '%봉디%' LIMIT 10;\" 2>&1)",
+      "Bash(docker compose exec db psql -U user -d owleague -c \"SELECT id, email, nickname, current_rank FROM users WHERE nickname LIKE '%우봉%' OR nickname LIKE '%봉디%' LIMIT 10;\" 2>&1)",
+      "Bash(docker compose exec db psql -U user -d owleague -c \"SELECT id, email, nickname FROM users WHERE nickname LIKE '%우봉%' OR nickname LIKE '%봉디%' OR nickname LIKE '%우%' LIMIT 10;\" 2>&1)",
+      "Bash(docker compose exec db psql -U user -d owleague -c \"SELECT id, email, nickname, password_hash FROM users WHERE nickname = '우봉디1';\" 2>&1)",
+      "Bash(find /Users/wonseok/Desktop/ow-league -path \"*/types*\" -o -path \"*/schema*\" | grep -E \"\\\\.\\(ts|py\\)$\" | head -15)",
+      "Bash(find /Users/wonseok/Desktop/ow-league -path \"*node_modules\" -prune -o -type f \\\\\\( -name \"*.ts\" -o -name \"*.py\" \\\\\\) -path \"*types*\" -print 2>/dev/null | head -10)",
+      "Bash(find /Users/wonseok/Desktop/ow-league/backend -path \"*schemas*\" -type f -name \"*.py\" 2>/dev/null | head -5)",
+      "Bash(cd /Users/wonseok/Desktop/ow-league && docker-compose up -d --build frontend 2>&1)",
+      "Bash(docker-compose ps 2>&1)",
+      "Bash(docker-compose logs --tail=80 backend 2>&1)",
+      "Bash(docker-compose exec backend alembic current 2>&1 | grep -v \"level=warning\")",
+      "Bash(docker-compose exec backend alembic upgrade head)",
+      "Bash(docker-compose exec backend alembic current)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/docs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000 && echo \"\" && curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/docs)",
+      "Bash(find /Users/wonseok/Desktop/ow-league -type f -name \"balancing.py\" -o -name \"*balanc*\" | grep -E \"\\\\.\\(py|ts\\)$\")",
+      "Bash(cd /Users/wonseok/Desktop/ow-league && docker-compose up -d --build frontend backend 2>&1)"
     ]
   }
 }

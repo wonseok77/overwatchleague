@@ -127,6 +127,7 @@ describe('AdminPage', () => {
           position_ranks: [
             { position: 'dps', rank: 'Gold 3', mmr: 1000 },
           ],
+          is_hidden: false,
         },
       ])
 

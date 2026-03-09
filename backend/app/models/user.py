@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, Integer, Float, ForeignKey, DateTime, Enum as SAEnum, UniqueConstraint
+from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, DateTime, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +24,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     role: Mapped[str] = mapped_column(SAEnum("admin", "manager", "member", name="user_role"), default="member")
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     profile: Mapped[Optional["PlayerProfile"]] = relationship("PlayerProfile", back_populates="user", uselist=False)

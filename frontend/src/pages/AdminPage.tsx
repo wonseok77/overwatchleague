@@ -29,6 +29,7 @@ import {
   updateAdminMember,
   updateAdminMemberMMR,
   deleteAdminMember,
+  toggleMemberHidden,
   updateWebhook,
   testWebhook,
   type AdminSeasonResponse,
@@ -36,8 +37,9 @@ import {
   type AdminPositionRankUpdate,
 } from '@/api/admin'
 import { setUserRanks } from '@/api/ranks'
-import { Plus, Pencil, Trash2, Download, Shield, Sword, Heart } from 'lucide-react'
+import { Plus, Pencil, Trash2, Download, Shield, Sword, Heart, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { RankBadge } from '@/components/RankBadge'
 import { useAuth } from '@/contexts/AuthContext'
 
 // ─── 상수 ───
@@ -650,7 +652,9 @@ function MembersTab() {
     })
     setMmrDraft(mmr)
     setRankDraft(rank)
-    setRankSeasonId('')
+    // 활성 시즌을 기본 선택
+    const activeSeason = seasons.find(s => s.status === 'active')
+    setRankSeasonId(activeSeason?.id ?? '')
     setMmrTarget(m)
   }
 
@@ -684,7 +688,7 @@ function MembersTab() {
         .filter((pos) => mmrDraft[pos] !== '')
         .map((pos) => ({ position: pos, mmr: Number(mmrDraft[pos]) }))
       if (mmrPayload.length > 0) {
-        await updateAdminMemberMMR(mmrTarget.user_id, mmrPayload)
+        await updateAdminMemberMMR(mmrTarget.user_id, mmrPayload, rankSeasonId || undefined)
       }
 
       load()
@@ -703,6 +707,17 @@ function MembersTab() {
       setMembers((prev) => prev.filter((mm) => mm.user_id !== m.user_id))
     } catch {
       alert('멤버 삭제 실패')
+    }
+  }
+
+  const handleToggleHidden = async (userId: string) => {
+    try {
+      const result = await toggleMemberHidden(userId)
+      setMembers((prev) => prev.map((m) =>
+        m.user_id === userId ? { ...m, is_hidden: result.is_hidden } : m
+      ))
+    } catch {
+      alert('숨김 상태 변경 실패')
     }
   }
 
@@ -725,7 +740,7 @@ function MembersTab() {
             </thead>
             <tbody>
               {members.map((m) => (
-                <tr key={m.user_id} className="border-b last:border-0">
+                <tr key={m.user_id} className={cn("border-b last:border-0", m.is_hidden && "opacity-50")}>
                   {/* 닉네임 + 아바타 */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -747,6 +762,18 @@ function MembersTab() {
                       >
                         <Pencil className="h-3 w-3" />
                       </Link>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-yellow-500"
+                        onClick={() => handleToggleHidden(m.user_id)}
+                        title={m.is_hidden ? '멤버 표시' : '멤버 숨김'}
+                      >
+                        {m.is_hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      </Button>
+                      {m.is_hidden && (
+                        <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-400">숨김</Badge>
+                      )}
                       {m.real_name !== '장원석' && (
                         <Button
                           variant="ghost"
@@ -786,7 +813,7 @@ function MembersTab() {
                               <span className={`font-medium ${POSITION_COLOR[pr.position]}`}>
                                 {POSITION_LABEL[pr.position]}
                               </span>
-                              <span className="text-muted-foreground">{pr.rank}</span>
+                              <RankBadge rank={pr.rank} className="text-[10px] px-1.5 py-0" />
                               {pr.mmr != null && (
                                 <span className="text-muted-foreground">({pr.mmr})</span>
                               )}
@@ -848,7 +875,6 @@ function MembersTab() {
               value={rankSeasonId}
               onChange={(e) => setRankSeasonId(e.target.value)}
             >
-              <option value="">시즌 미지정 (현재)</option>
               {seasons.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}

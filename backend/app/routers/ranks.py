@@ -73,6 +73,12 @@ def set_user_ranks(
     results = []
     for item in body:
         sid = uuid.UUID(item.season_id) if item.season_id else None
+        if not sid:
+            active = db.query(Season).filter(
+                Season.community_id == current_user.community_id,
+                Season.status == "active",
+            ).first()
+            sid = active.id if active else None
         existing = db.query(PlayerPositionRank).filter(
             PlayerPositionRank.user_id == user_id,
             PlayerPositionRank.season_id == sid if sid else PlayerPositionRank.season_id.is_(None),
@@ -109,9 +115,19 @@ def get_current_ranks(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # 사용자의 커뮤니티에서 활성 시즌 조회
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    active_season = db.query(Season).filter(
+        Season.community_id == user.community_id,
+        Season.status == "active",
+    ).first()
+    if not active_season:
+        return []
     ranks = db.query(PlayerPositionRank).filter(
         PlayerPositionRank.user_id == user_id,
-        PlayerPositionRank.season_id.is_(None),
+        PlayerPositionRank.season_id == active_season.id,
     ).all()
     return [_rank_response(r) for r in ranks]
 

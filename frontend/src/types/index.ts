@@ -145,6 +145,8 @@ export interface MatchmakingPlayer {
   assigned_position: PositionType
   priority_used: number
   score: number
+  mmr: number
+  rank: string | null
 }
 
 export interface MatchmakingGame {
@@ -154,12 +156,19 @@ export interface MatchmakingGame {
   team_a_score: number
   team_b_score: number
   score_diff: number
+  team_a_avg_mmr: number
+  team_b_avg_mmr: number
+  mmr_diff: number
 }
 
 export interface MatchmakingPlayerStat {
   user_id: string
   nickname: string
   games_played: number
+  priority_1_count?: number
+  priority_2_count?: number
+  priority_3_count?: number
+  forced_count?: number
 }
 
 export interface MatchmakingResult {
