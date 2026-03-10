@@ -10,7 +10,9 @@ import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui
 import { MatchResultForm } from '@/components/MatchResultForm'
 import { HighlightCard } from '@/components/HighlightCard'
 import { RoleBadge } from '@/components/RoleBadge'
+import { RankBadge } from '@/components/RankBadge'
 import { HeroBadge } from '@/components/HeroBadge'
+import { HeroPortrait } from '@/components/HeroPortrait'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   getMatch,
@@ -18,16 +20,16 @@ import {
   submitMatchStats,
   createHighlight,
   deleteHighlight,
-  triggerOcr,
   updateMatchStatus,
 } from '@/api/matches'
 import type { MatchDetail, MatchDetailParticipant } from '@/api/matches'
-import type { MatchResultFormData } from '@/components/MatchResultForm'
+import type { MatchResultFormData, PlayerStatInput } from '@/components/MatchResultForm'
 import type { HighlightData } from '@/components/HighlightCard'
+import { getHeroes, type Hero } from '@/api/heroes'
 import type { MatchStatus, MainRole } from '@/types'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { Calendar, MapPin, Plus, Scan } from 'lucide-react'
+import { Calendar, MapPin, Plus } from 'lucide-react'
 
 const statusConfig: Record<MatchStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   open: { label: '모집 중', variant: 'default' },
@@ -44,7 +46,17 @@ export default function MatchDetailPage() {
   const [submitting, setSubmitting] = useState(false)
   const [showHighlightDialog, setShowHighlightDialog] = useState(false)
   const [highlightForm, setHighlightForm] = useState({ title: '', youtube_url: '', user_id: '' })
-  const [ocrLoading, setOcrLoading] = useState<string | null>(null)
+  const [heroMap, setHeroMap] = useState<Map<string, Hero>>(new Map())
+
+  useEffect(() => {
+    getHeroes()
+      .then((heroes) => {
+        const map = new Map<string, Hero>()
+        heroes.forEach((h) => map.set(h.name, h))
+        setHeroMap(map)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -75,6 +87,17 @@ export default function MatchDetailPage() {
         if (data.screenshot) {
           formData.append('screenshot', data.screenshot)
         }
+        // 스탯 데이터 추가
+        const playerStat = data.player_stats?.find((s: PlayerStatInput) => s.user_id === ph.user_id)
+        if (playerStat) {
+          const statFields = ['kills', 'assists', 'deaths', 'damage_dealt', 'healing_done', 'damage_mitigated'] as const
+          for (const key of statFields) {
+            if (playerStat[key] !== undefined && playerStat[key] !== null) {
+              formData.append(key, String(playerStat[key]))
+            }
+          }
+          formData.append('stat_source', 'manual')
+        }
         await submitMatchStats(id, ph.user_id, formData)
       }
 
@@ -101,20 +124,6 @@ export default function MatchDetailPage() {
       setHighlightForm({ title: '', youtube_url: '', user_id: '' })
     } catch {
       // ignore
-    }
-  }
-
-  const handleOcrExtract = async (userId: string) => {
-    if (!id) return
-    setOcrLoading(userId)
-    try {
-      await triggerOcr(id, userId)
-      const updated = await getMatch(id)
-      setMatch(updated)
-    } catch {
-      alert('OCR 추출에 실패했습니다')
-    } finally {
-      setOcrLoading(null)
     }
   }
 
@@ -173,6 +182,7 @@ export default function MatchDetailPage() {
               {p.nickname}
             </Link>
             {p.main_role && <RoleBadge role={p.main_role as MainRole} />}
+            {p.position_rank && <RankBadge rank={p.position_rank} compact />}
             {p.mmr != null && <span className="text-xs text-muted-foreground">MMR {p.mmr}</span>}
             {p.heroes_played && p.heroes_played.length > 0 && (
               <div className="flex gap-1">
@@ -185,18 +195,6 @@ export default function MatchDetailPage() {
               <span className={`text-xs font-semibold ${p.mmr_change > 0 ? 'text-green-600' : p.mmr_change < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                 {p.mmr_change > 0 ? '+' : ''}{p.mmr_change}
               </span>
-            )}
-            {isAdmin && p.screenshot_path && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={ocrLoading === p.user_id}
-                onClick={() => handleOcrExtract(p.user_id)}
-                className="ml-auto h-7 px-2 text-xs"
-              >
-                <Scan className="mr-1 h-3 w-3" />
-                {ocrLoading === p.user_id ? '추출 중...' : 'OCR 추출'}
-              </Button>
             )}
           </div>
         ))}
@@ -268,12 +266,68 @@ export default function MatchDetailPage() {
                 {renderTeam('A팀', teamA)}
                 {renderTeam('B팀', teamB)}
               </div>
+
+              {/* 스탯 테이블 */}
+              {isCompleted && match.participants.length > 0 && (
+                <div className="mt-6 space-y-3">
+                  <h3 className="text-base font-semibold">개인 스탯</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[
+                    { label: 'A팀', members: teamA },
+                    { label: 'B팀', members: teamB },
+                  ].map(({ label, members }) => (
+                    <div key={label} className="space-y-1">
+                      <h4 className="text-sm font-medium text-muted-foreground">{label}</h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-base">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left py-2.5 px-3 font-medium">닉네임</th>
+                              <th className="text-center py-2.5 px-3 font-medium">처치</th>
+                              <th className="text-center py-2.5 px-3 font-medium">도움</th>
+                              <th className="text-center py-2.5 px-3 font-medium">죽음</th>
+                              <th className="text-center py-2.5 px-3 font-medium">피해</th>
+                              <th className="text-center py-2.5 px-3 font-medium">치유</th>
+                              <th className="text-center py-2.5 px-3 font-medium">경감</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {members.map((p) => (
+                              <tr key={p.user_id} className="border-b last:border-0">
+                                <td className="py-2.5 px-3 font-medium whitespace-nowrap">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-20 truncate">{p.nickname}</span>
+                                    {p.heroes_played && p.heroes_played.length > 0 && (
+                                      <div className="flex gap-0.5">
+                                        {p.heroes_played.map((h) => (
+                                          <HeroPortrait key={h} hero={h} heroMap={heroMap} size="h-7 w-7" />
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="text-center py-2.5 px-3">{p.kills ?? '-'}</td>
+                                <td className="text-center py-2.5 px-3">{p.assists ?? '-'}</td>
+                                <td className="text-center py-2.5 px-3">{p.deaths ?? '-'}</td>
+                                <td className="text-center py-2.5 px-3">{p.damage_dealt != null ? p.damage_dealt.toLocaleString() : '-'}</td>
+                                <td className="text-center py-2.5 px-3">{p.healing_done != null ? p.healing_done.toLocaleString() : '-'}</td>
+                                <td className="text-center py-2.5 px-3">{p.damage_mitigated != null ? p.damage_mitigated.toLocaleString() : '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
 
         {/* Admin Result Form */}
-        {isInProgress && isAdmin && (
+        {isInProgress && isAdminOrManager && (
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">결과 입력</CardTitle>

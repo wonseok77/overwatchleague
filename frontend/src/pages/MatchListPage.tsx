@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import React, { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { MatchCard } from '@/components/MatchCard'
@@ -8,8 +8,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCommunityId } from '@/hooks/useCommunityId'
+import { getHeroes, type Hero } from '@/api/heroes'
+import { HeroPortrait } from '@/components/HeroPortrait'
 import { getSeasons } from '@/api/seasons'
-import { getMatches, registerForMatch, cancelRegistration, closeRegistration } from '@/api/matches'
+import { getMatches, getMatch, registerForMatch, cancelRegistration, closeRegistration } from '@/api/matches'
+import type { MatchDetail } from '@/api/matches'
 import { getSessions, createSession } from '@/api/sessions'
 import type { Match, MatchSession, Season, SessionStatus } from '@/types'
 import { Plus, Calendar, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react'
@@ -256,13 +260,19 @@ interface SessionCreateForm {
 
 export default function MatchListPage() {
   const { user, isAdmin } = useAuth()
+  const communityId = useCommunityId()
   const navigate = useNavigate()
+
+  // 영웅 맵
+  const [heroMap, setHeroMap] = useState<Map<string, Hero>>(new Map())
 
   // 기존 Match 상태
   const [matches, setMatches] = useState<Match[]>([])
   const [seasonId, setSeasonId] = useState<string | null>(null)
   const [registeredMatchIds, setRegisteredMatchIds] = useState<Set<string>>(new Set())
   const [matchHistoryOpen, setMatchHistoryOpen] = useState(false)
+  const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null)
+  const [matchDetails, setMatchDetails] = useState<Record<string, MatchDetail>>({})
 
   // 시즌 목록 상태
   const [allSeasons, setAllSeasons] = useState<Season[]>([])
@@ -292,11 +302,17 @@ export default function MatchListPage() {
   }
 
   useEffect(() => {
-    if (!user) return
+    if (!communityId) return
     const load = async () => {
       try {
-        const seasons = await getSeasons(user.community_id)
+        const [seasons, heroes] = await Promise.all([
+          getSeasons(communityId),
+          getHeroes(),
+        ])
         setAllSeasons(seasons)
+        const map = new Map<string, Hero>()
+        heroes.forEach((h) => map.set(h.name, h))
+        setHeroMap(map)
         const activeSeason = seasons.find((s) => s.status === 'active')
         if (!activeSeason) return
         setSeasonId(activeSeason.id)
@@ -312,7 +328,7 @@ export default function MatchListPage() {
       }
     }
     load()
-  }, [user])
+  }, [communityId])
 
   const handleCreateSession = async (e: FormEvent) => {
     e.preventDefault()
@@ -369,6 +385,21 @@ export default function MatchListPage() {
       await closeRegistration(matchId)
       navigate(`/matches/${matchId}/teams`)
     } catch { /* ignore */ }
+  }
+
+  const handleToggleStats = async (e: React.MouseEvent, matchId: string) => {
+    e.stopPropagation()
+    if (expandedMatchId === matchId) {
+      setExpandedMatchId(null)
+      return
+    }
+    setExpandedMatchId(matchId)
+    if (!matchDetails[matchId]) {
+      try {
+        const detail = await getMatch(matchId)
+        setMatchDetails(prev => ({ ...prev, [matchId]: detail }))
+      } catch { /* ignore */ }
+    }
   }
 
   // 세션 필터링
@@ -554,6 +585,9 @@ export default function MatchListPage() {
               ) : (
                 matches.map((m) => {
                   const participantCount = (m as Match & { participants?: unknown[] }).participants?.length ?? 0
+                  const isCompleted = m.status === 'completed'
+                  const isExpanded = expandedMatchId === m.id
+                  const detail = matchDetails[m.id]
                   return (
                     <div key={m.id} className="space-y-2">
                       <MatchCard
@@ -561,7 +595,78 @@ export default function MatchListPage() {
                         scheduledAt={m.scheduled_at}
                         status={m.status}
                         currentParticipants={participantCount}
+                        result={m.result}
+                        teamAScore={m.team_a_score}
+                        teamBScore={m.team_b_score}
+                        mapName={m.map_name}
+                        onClick={() => navigate(`/matches/${m.id}`)}
+                        className="cursor-pointer"
                       />
+                      {isCompleted && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleStats(e, m.id)}
+                          className="flex items-center gap-1 px-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          스탯 보기
+                        </button>
+                      )}
+                      {isExpanded && detail && detail.participants.some(p => p.kills != null || p.damage_dealt != null) && (
+                        <div className="rounded-md border bg-muted/30 p-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {(['A', 'B'] as const).map(team => {
+                            const members = detail.participants.filter(p => p.team === team)
+                            if (members.length === 0) return null
+                            return (
+                              <div key={team} className="space-y-1">
+                                <h4 className="text-sm font-medium text-muted-foreground">{team}팀</h4>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-base">
+                                    <thead>
+                                      <tr className="border-b">
+                                        <th className="text-left py-2.5 px-3 font-medium">닉네임</th>
+                                        <th className="text-center py-2.5 px-3 font-medium">처치</th>
+                                        <th className="text-center py-2.5 px-3 font-medium">도움</th>
+                                        <th className="text-center py-2.5 px-3 font-medium">죽음</th>
+                                        <th className="text-center py-2.5 px-3 font-medium">피해</th>
+                                        <th className="text-center py-2.5 px-3 font-medium">치유</th>
+                                        <th className="text-center py-2.5 px-3 font-medium">경감</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {members.map(p => (
+                                        <tr key={p.user_id} className="border-b last:border-0">
+                                          <td className="py-2.5 px-3 font-medium whitespace-nowrap">
+                                            <div className="flex items-center gap-2">
+                                              <span>{p.nickname}</span>
+                                              {p.heroes_played?.map((h) => (
+                                                <HeroPortrait key={h} hero={h} heroMap={heroMap} size="h-7 w-7" />
+                                              ))}
+                                            </div>
+                                          </td>
+                                          <td className="text-center py-2.5 px-3">{p.kills ?? '-'}</td>
+                                          <td className="text-center py-2.5 px-3">{p.assists ?? '-'}</td>
+                                          <td className="text-center py-2.5 px-3">{p.deaths ?? '-'}</td>
+                                          <td className="text-center py-2.5 px-3">{p.damage_dealt != null ? p.damage_dealt.toLocaleString() : '-'}</td>
+                                          <td className="text-center py-2.5 px-3">{p.healing_done != null ? p.healing_done.toLocaleString() : '-'}</td>
+                                          <td className="text-center py-2.5 px-3">{p.damage_mitigated != null ? p.damage_mitigated.toLocaleString() : '-'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )
+                          })}
+                          </div>
+                        </div>
+                      )}
+                      {isExpanded && detail && !detail.participants.some(p => p.kills != null || p.damage_dealt != null) && (
+                        <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground text-center">
+                          스탯 데이터가 없습니다.
+                        </div>
+                      )}
                       {m.status === 'open' && user && (
                         <div className="flex gap-2 px-1">
                           {registeredMatchIds.has(m.id) ? (

@@ -83,7 +83,6 @@ def _registration_response(
 def list_sessions(
     season_id: uuid.UUID,
     month: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = db.query(MatchSession).filter(MatchSession.season_id == season_id)
@@ -698,4 +697,46 @@ def confirm_matchmaking(
             games,
         )
 
-    return {"message": "Matchmaking confirmed", "matches_created": matches_created}
+    match_ids = [str(m.id) for m in db.query(Match).filter(
+        Match.id.in_([p.match_id for p in db.query(MatchParticipant.match_id).filter(
+            MatchParticipant.session_id == session_id
+        ).distinct()])
+    ).all()]
+
+    return {"message": "Matchmaking confirmed", "matches_created": matches_created, "match_ids": match_ids}
+
+
+@router.get("/sessions/{session_id}/matches")
+def get_session_matches(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    session = db.query(MatchSession).filter(MatchSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    match_ids_q = (
+        db.query(MatchParticipant.match_id)
+        .filter(MatchParticipant.session_id == session_id)
+        .distinct()
+    )
+    matches = (
+        db.query(Match)
+        .filter(Match.id.in_(match_ids_q))
+        .order_by(Match.title)
+        .all()
+    )
+
+    return [
+        {
+            "id": str(m.id),
+            "title": m.title,
+            "status": m.status,
+            "map_name": m.map_name,
+            "result": m.result,
+            "team_a_score": m.team_a_score,
+            "team_b_score": m.team_b_score,
+            "scheduled_at": m.scheduled_at.isoformat() if m.scheduled_at else None,
+        }
+        for m in matches
+    ]

@@ -41,6 +41,38 @@ export function ScreenshotDropzone({ onFileSelect, preview, className }: Screens
     [onFileSelect]
   )
 
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (!file) continue
+
+          if (file.size > MAX_SIZE) {
+            setError('파일 크기가 10MB를 초과합니다.')
+            return
+          }
+
+          const accepted = Object.keys(ACCEPTED_TYPES)
+          if (!accepted.includes(file.type)) {
+            setError('JPG, PNG, WebP 형식만 허용됩니다.')
+            return
+          }
+
+          setError(null)
+          setLocalPreview(URL.createObjectURL(file))
+          onFileSelect(file)
+          e.preventDefault()
+          return
+        }
+      }
+    },
+    [onFileSelect]
+  )
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: ACCEPTED_TYPES,
@@ -56,7 +88,7 @@ export function ScreenshotDropzone({ onFileSelect, preview, className }: Screens
   }
 
   return (
-    <div className={className}>
+    <div className={className} onPaste={handlePaste} tabIndex={0}>
       <div
         {...getRootProps()}
         className={cn(
@@ -94,7 +126,7 @@ export function ScreenshotDropzone({ onFileSelect, preview, className }: Screens
               <ImageIcon className="h-10 w-10 text-gray-400 mb-2" />
             )}
             <p className="text-sm font-medium text-gray-700">
-              {isDragActive ? '여기에 놓으세요' : '이미지를 드래그하거나 클릭하여 선택'}
+              {isDragActive ? '여기에 놓으세요' : '드래그, 클릭, 또는 Ctrl+V로 이미지 붙여넣기'}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               JPG, PNG, WebP (최대 10MB)

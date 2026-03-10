@@ -18,7 +18,7 @@ from app.services.auth import get_current_user, require_admin, require_manager_o
 from app.services.balancing import auto_balance_teams, calculate_mmr_change, compute_player_score
 from app.services.mmr import calculate_mmr_change as calc_pos_mmr_change
 from app.services.discord import send_match_scheduled, send_match_result
-from app.services.ocr import extract_stats_from_image
+from app.services.ocr import extract_stats_from_image, extract_scoreboard_stats
 
 router = APIRouter()
 
@@ -81,6 +81,53 @@ def get_match_detail(match_id: uuid.UUID, db: Session = Depends(get_db)):
     if not match:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
 
+    def _resolve_position_mmr(
+        user_id: uuid.UUID,
+        assigned_position: str | None,
+        season_id: uuid.UUID,
+        profile: PlayerProfile | None,
+    ) -> int | None:
+        """배정 포지션의 MMR 반환. fallback: profile.mmr"""
+        if not assigned_position:
+            return profile.mmr if profile else None
+        pos_rank = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == user_id,
+            PlayerPositionRank.position == assigned_position,
+            PlayerPositionRank.season_id == season_id,
+        ).first()
+        if pos_rank and pos_rank.mmr is not None:
+            return pos_rank.mmr
+        pos_rank = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == user_id,
+            PlayerPositionRank.position == assigned_position,
+            PlayerPositionRank.season_id.is_(None),
+        ).first()
+        if pos_rank and pos_rank.mmr is not None:
+            return pos_rank.mmr
+        return profile.mmr if profile else None
+
+    def _resolve_position_rank(
+        user_id: uuid.UUID,
+        assigned_position: str | None,
+        season_id: uuid.UUID,
+    ) -> str | None:
+        """배정 포지션의 랭크 반환 (예: Diamond 3)"""
+        if not assigned_position:
+            return None
+        pos_rank = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == user_id,
+            PlayerPositionRank.position == assigned_position,
+            PlayerPositionRank.season_id == season_id,
+        ).first()
+        if pos_rank and pos_rank.rank:
+            return pos_rank.rank
+        pos_rank = db.query(PlayerPositionRank).filter(
+            PlayerPositionRank.user_id == user_id,
+            PlayerPositionRank.position == assigned_position,
+            PlayerPositionRank.season_id.is_(None),
+        ).first()
+        return pos_rank.rank if pos_rank and pos_rank.rank else None
+
     participants_data = []
     for p in match.participants:
         user = db.query(User).filter(User.id == p.user_id).first()
@@ -94,12 +141,21 @@ def get_match_detail(match_id: uuid.UUID, db: Session = Depends(get_db)):
             "team": p.team,
             "main_role": profile.main_role if profile else None,
             "current_rank": profile.current_rank if profile else None,
-            "mmr": profile.mmr if profile else None,
+            "mmr": _resolve_position_mmr(p.user_id, p.assigned_position, match.season_id, profile),
+            "assigned_position": p.assigned_position,
+            "position_rank": _resolve_position_rank(p.user_id, p.assigned_position, match.season_id),
             "heroes_played": stat.heroes_played if stat else None,
             "screenshot_path": stat.screenshot_path if stat else None,
             "mmr_before": stat.mmr_before if stat else None,
             "mmr_after": stat.mmr_after if stat else None,
             "mmr_change": stat.mmr_change if stat else None,
+            "kills": stat.kills if stat else None,
+            "assists": stat.assists if stat else None,
+            "deaths": stat.deaths if stat else None,
+            "damage_dealt": stat.damage_dealt if stat else None,
+            "healing_done": stat.healing_done if stat else None,
+            "damage_mitigated": stat.damage_mitigated if stat else None,
+            "stat_source": stat.stat_source if stat else None,
         })
 
     highlights_data = [
@@ -430,14 +486,27 @@ def submit_result(
             change = calculate_mmr_change(is_winner, team_a_score_total, team_b_score_total)
             profile.mmr = max(0, profile.mmr + change)
 
-            stat = PlayerMatchStat(
-                match_id=match_id,
-                user_id=p.user_id,
-                mmr_before=mmr_before,
-                mmr_after=profile.mmr,
-                mmr_change=change,
+            existing_stat = (
+                db.query(PlayerMatchStat)
+                .filter(
+                    PlayerMatchStat.match_id == match_id,
+                    PlayerMatchStat.user_id == p.user_id,
+                )
+                .first()
             )
-            db.add(stat)
+            if existing_stat:
+                existing_stat.mmr_before = mmr_before
+                existing_stat.mmr_after = profile.mmr
+                existing_stat.mmr_change = change
+            else:
+                existing_stat = PlayerMatchStat(
+                    match_id=match_id,
+                    user_id=p.user_id,
+                    mmr_before=mmr_before,
+                    mmr_after=profile.mmr,
+                    mmr_change=change,
+                )
+                db.add(existing_stat)
 
             # 포지션별 MMR 업데이트
             position = p.assigned_position or (profile.main_role if profile else None)
@@ -452,15 +521,7 @@ def submit_result(
                     .first()
                 )
                 if pos_rank and pos_rank.mmr is not None:
-                    existing_stat = (
-                        db.query(PlayerMatchStat)
-                        .filter(
-                            PlayerMatchStat.match_id == match_id,
-                            PlayerMatchStat.user_id == p.user_id,
-                        )
-                        .first()
-                    )
-                    stat_bonus = _compute_stat_bonus(existing_stat, position) if existing_stat else 0.0
+                    stat_bonus = _compute_stat_bonus(existing_stat, position)
                     pos_change = calc_pos_mmr_change(is_winner, stat_bonus)
                     pos_rank.mmr = max(0, pos_rank.mmr + pos_change)
 
@@ -472,14 +533,27 @@ def submit_result(
             change = calculate_mmr_change(is_winner, team_b_score_total, team_a_score_total)
             profile.mmr = max(0, profile.mmr + change)
 
-            stat = PlayerMatchStat(
-                match_id=match_id,
-                user_id=p.user_id,
-                mmr_before=mmr_before,
-                mmr_after=profile.mmr,
-                mmr_change=change,
+            existing_stat = (
+                db.query(PlayerMatchStat)
+                .filter(
+                    PlayerMatchStat.match_id == match_id,
+                    PlayerMatchStat.user_id == p.user_id,
+                )
+                .first()
             )
-            db.add(stat)
+            if existing_stat:
+                existing_stat.mmr_before = mmr_before
+                existing_stat.mmr_after = profile.mmr
+                existing_stat.mmr_change = change
+            else:
+                existing_stat = PlayerMatchStat(
+                    match_id=match_id,
+                    user_id=p.user_id,
+                    mmr_before=mmr_before,
+                    mmr_after=profile.mmr,
+                    mmr_change=change,
+                )
+                db.add(existing_stat)
 
             # 포지션별 MMR 업데이트
             position = p.assigned_position or (profile.main_role if profile else None)
@@ -494,15 +568,7 @@ def submit_result(
                     .first()
                 )
                 if pos_rank and pos_rank.mmr is not None:
-                    existing_stat = (
-                        db.query(PlayerMatchStat)
-                        .filter(
-                            PlayerMatchStat.match_id == match_id,
-                            PlayerMatchStat.user_id == p.user_id,
-                        )
-                        .first()
-                    )
-                    stat_bonus = _compute_stat_bonus(existing_stat, position) if existing_stat else 0.0
+                    stat_bonus = _compute_stat_bonus(existing_stat, position)
                     pos_change = calc_pos_mmr_change(is_winner, stat_bonus)
                     pos_rank.mmr = max(0, pos_rank.mmr + pos_change)
 
@@ -532,6 +598,13 @@ def upload_player_stat(
     user_id: uuid.UUID,
     heroes_played: Optional[str] = Form(None),
     screenshot: Optional[UploadFile] = File(None),
+    kills: Optional[int] = Form(None),
+    assists: Optional[int] = Form(None),
+    deaths: Optional[int] = Form(None),
+    damage_dealt: Optional[int] = Form(None),
+    healing_done: Optional[int] = Form(None),
+    damage_mitigated: Optional[int] = Form(None),
+    stat_source: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     match = db.query(Match).filter(Match.id == match_id).first()
@@ -564,17 +637,31 @@ def upload_player_stat(
         .first()
     )
 
+    stat_fields = {
+        "kills": kills,
+        "assists": assists,
+        "deaths": deaths,
+        "damage_dealt": damage_dealt,
+        "healing_done": healing_done,
+        "damage_mitigated": damage_mitigated,
+        "stat_source": stat_source or ("manual" if any(v is not None for v in [kills, assists, deaths, damage_dealt, healing_done, damage_mitigated]) else None),
+    }
+
     if stat:
         if heroes_list is not None:
             stat.heroes_played = heroes_list
         if screenshot_path:
             stat.screenshot_path = screenshot_path
+        for key, value in stat_fields.items():
+            if value is not None:
+                setattr(stat, key, value)
     else:
         stat = PlayerMatchStat(
             match_id=match_id,
             user_id=user_id,
             heroes_played=heroes_list,
             screenshot_path=screenshot_path,
+            **{k: v for k, v in stat_fields.items() if v is not None},
         )
         db.add(stat)
 
@@ -587,6 +674,13 @@ def upload_player_stat(
         "user_id": str(stat.user_id),
         "heroes_played": stat.heroes_played,
         "screenshot_path": stat.screenshot_path,
+        "kills": stat.kills,
+        "assists": stat.assists,
+        "deaths": stat.deaths,
+        "damage_dealt": stat.damage_dealt,
+        "healing_done": stat.healing_done,
+        "damage_mitigated": stat.damage_mitigated,
+        "stat_source": stat.stat_source,
     }
 
 
@@ -639,3 +733,27 @@ def ocr_extract_stats(
         "healing_done": stat.healing_done,
         "stat_source": stat.stat_source,
     }
+
+
+@router.post("/ocr/extract-scoreboard")
+def ocr_extract_scoreboard(
+    screenshot: UploadFile = File(...),
+):
+    """스코어보드 이미지에서 전체 플레이어 스탯을 추출"""
+    import tempfile
+
+    ext = os.path.splitext(screenshot.filename)[1] if screenshot.filename else ".png"
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(screenshot.file.read())
+        tmp_path = tmp.name
+
+    try:
+        players = extract_scoreboard_stats(tmp_path)
+        if not players:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Failed to extract stats from scoreboard",
+            )
+        return {"players": players}
+    finally:
+        os.unlink(tmp_path)

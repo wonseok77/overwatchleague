@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.community import Community
 from app.models.user import User, PlayerProfile, PlayerPositionRank
 from app.schemas.user import MemberCreate, MemberUpdate, MemberResponse
-from app.services.auth import hash_password, require_admin, get_current_user
+from app.services.auth import hash_password, require_admin
 
 router = APIRouter()
 
@@ -37,7 +37,6 @@ class LeaderboardEntry(BaseModel):
 def get_leaderboard(
     community_id: uuid.UUID,
     season_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     users = (

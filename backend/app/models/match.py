@@ -73,6 +73,7 @@ class PlayerMatchStat(Base):
     assists: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     damage_dealt: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     healing_done: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    damage_mitigated: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     survivability_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     stat_source: Mapped[Optional[str]] = mapped_column(
         SAEnum("manual", "ocr", name="stat_source_type"), nullable=True

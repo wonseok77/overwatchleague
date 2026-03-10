@@ -66,10 +66,22 @@ class SeasonStatInfo(BaseModel):
     rank_position: Optional[int] = None
 
 
+class CombatStatsInfo(BaseModel):
+    games_with_stats: int
+    kd_ratio: float
+    kda_ratio: float
+    avg_kills: float
+    avg_deaths: float
+    avg_damage_dealt: float
+    avg_healing_done: float
+    avg_damage_mitigated: float
+
+
 class ProfileResponse(BaseModel):
     user: UserInfo
     player_profile: Optional[PlayerProfileInfo] = None
     stats: StatsInfo
+    combat_stats: Optional[CombatStatsInfo] = None
     recent_matches: List[RecentMatchInfo]
     season_stats: List[SeasonStatInfo]
 
@@ -107,6 +119,42 @@ def get_user_profile(user_id: uuid.UUID, db: Session = Depends(get_db)):
 
     total_matches = wins + losses
     win_rate = round(wins / total_matches * 100, 1) if total_matches > 0 else 0.0
+
+    # Combat stats aggregation
+    total_kills = total_deaths = total_assists = 0
+    total_damage = total_healing = total_mitigated = 0
+    kill_games = damage_games = healing_games = mitigated_games = 0
+
+    for _stat, _team, _result in stats_rows:
+        if _stat.kills is not None:
+            total_kills += _stat.kills
+            kill_games += 1
+        if _stat.deaths is not None:
+            total_deaths += _stat.deaths
+        if _stat.assists is not None:
+            total_assists += _stat.assists
+        if _stat.damage_dealt is not None:
+            total_damage += _stat.damage_dealt
+            damage_games += 1
+        if _stat.healing_done is not None:
+            total_healing += _stat.healing_done
+            healing_games += 1
+        if _stat.damage_mitigated is not None:
+            total_mitigated += _stat.damage_mitigated
+            mitigated_games += 1
+
+    combat_stats = None
+    if kill_games > 0:
+        combat_stats = CombatStatsInfo(
+            games_with_stats=kill_games,
+            kd_ratio=round(total_kills / max(1, total_deaths), 2),
+            kda_ratio=round((total_kills + total_assists) / max(1, total_deaths), 2),
+            avg_kills=round(total_kills / kill_games, 1),
+            avg_deaths=round(total_deaths / max(1, kill_games), 1),
+            avg_damage_dealt=round(total_damage / max(1, damage_games)),
+            avg_healing_done=round(total_healing / max(1, healing_games)),
+            avg_damage_mitigated=round(total_mitigated / max(1, mitigated_games)),
+        )
 
     # Recent 20 matches
     recent_rows = (
@@ -184,6 +232,7 @@ def get_user_profile(user_id: uuid.UUID, db: Session = Depends(get_db)):
             losses=losses,
             win_rate=win_rate,
         ),
+        combat_stats=combat_stats,
         recent_matches=recent_matches,
         season_stats=season_stats,
     )

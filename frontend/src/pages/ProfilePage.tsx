@@ -23,7 +23,7 @@ import type { HighlightData } from '@/components/HighlightCard'
 import type { MatchHistoryData } from '@/components/MatchHistoryRow'
 import type { SeasonStatData } from '@/components/SeasonStatRow'
 import type { Highlight, Team, MatchResult, PositionRank, PositionType } from '@/types'
-import { Trophy, Target, TrendingUp, Gamepad2, Camera, Loader2, Pencil, Check, X } from 'lucide-react'
+import { Trophy, Target, TrendingUp, Gamepad2, Camera, Loader2, Pencil, Check, X, Swords, Shield, Heart, Skull, Crosshair } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const BASE_RANKS = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Master', 'Grandmaster', 'Champion']
@@ -515,6 +515,59 @@ export default function ProfilePage() {
             icon={<TrendingUp className="h-5 w-5" />}
           />
         </div>
+
+        {/* 전투 통계 */}
+        {profile.combat_stats && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">전투 통계</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                스탯이 기록된 {profile.combat_stats.games_with_stats}경기 기준
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatCard
+                  label="K/D"
+                  value={profile.combat_stats.kd_ratio.toFixed(2)}
+                  icon={<Crosshair className="h-5 w-5" />}
+                  trend={profile.combat_stats.kd_ratio >= 1 ? 'up' : 'down'}
+                />
+                <StatCard
+                  label="KDA"
+                  value={profile.combat_stats.kda_ratio.toFixed(2)}
+                  icon={<Swords className="h-5 w-5" />}
+                  trend={profile.combat_stats.kda_ratio >= 2 ? 'up' : 'down'}
+                />
+                <StatCard
+                  label="경기당 처치"
+                  value={profile.combat_stats.avg_kills.toFixed(1)}
+                  icon={<Target className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="경기당 죽음"
+                  value={profile.combat_stats.avg_deaths.toFixed(1)}
+                  icon={<Skull className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="경기당 딜량"
+                  value={profile.combat_stats.avg_damage_dealt.toLocaleString()}
+                  icon={<Swords className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="경기당 치유"
+                  value={profile.combat_stats.avg_healing_done.toLocaleString()}
+                  icon={<Heart className="h-5 w-5" />}
+                />
+                <StatCard
+                  label="경기당 경감"
+                  value={profile.combat_stats.avg_damage_mitigated.toLocaleString()}
+                  icon={<Shield className="h-5 w-5" />}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* 포지션별 티어 */}
         <Card>

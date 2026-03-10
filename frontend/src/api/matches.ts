@@ -59,6 +59,15 @@ export interface MatchDetailParticipant {
   mmr_before: number | null
   mmr_after: number | null
   mmr_change: number | null
+  kills: number | null
+  assists: number | null
+  deaths: number | null
+  damage_dealt: number | null
+  healing_done: number | null
+  damage_mitigated: number | null
+  stat_source: string | null
+  assigned_position: string | null
+  position_rank: string | null
 }
 
 export interface MatchDetailHighlight {
@@ -116,5 +125,23 @@ export interface PlayerMatchStat {
 
 export async function triggerOcr(matchId: string, userId: string): Promise<PlayerMatchStat> {
   const res = await apiClient.post(`/matches/${matchId}/stats/${userId}/ocr`)
+  return res.data
+}
+
+export interface ScoreboardPlayer {
+  row: number
+  kills: number | null
+  deaths: number | null
+  assists: number | null
+  damage_dealt: number | null
+  healing_done: number | null
+}
+
+export async function extractScoreboard(file: File): Promise<{ players: ScoreboardPlayer[] }> {
+  const formData = new FormData()
+  formData.append('screenshot', file)
+  const res = await apiClient.post('/ocr/extract-scoreboard', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return res.data
 }

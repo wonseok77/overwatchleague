@@ -33,6 +33,16 @@ export interface ProfileResponse {
     mmr_change: number | null
     heroes_played: string[] | null
   }[]
+  combat_stats: {
+    games_with_stats: number
+    kd_ratio: number
+    kda_ratio: number
+    avg_kills: number
+    avg_deaths: number
+    avg_damage_dealt: number
+    avg_healing_done: number
+    avg_damage_mitigated: number
+  } | null
   season_stats: {
     season_id: string
     season_name: string

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,6 +25,8 @@ import {
   confirmMatchmaking,
   updateSession,
   adminRegisterMember,
+  getSessionMatches,
+  type SessionMatch,
 } from '@/api/sessions'
 import { getAdminMembers, type AdminMemberResponse } from '@/api/admin'
 import type { MatchSession, SessionRegistration, MatchmakingResult, MatchmakingGame, PositionType, SessionStatus, MainRole } from '@/types'
@@ -338,6 +340,9 @@ export default function SessionDetailPage() {
   })
   const [savingReg, setSavingReg] = useState(false)
 
+  // 세션 매치 목록
+  const [sessionMatches, setSessionMatches] = useState<SessionMatch[]>([])
+
   // 신청 폼
   const [priority1, setPriority1] = useState<PositionType | ''>('')
   const [priority2, setPriority2] = useState<PositionType | ''>('')
@@ -364,6 +369,10 @@ export default function SessionDetailPage() {
       // 매치메이킹 미리보기 조회
       const prev = await getMatchmakingPreview(id).catch(() => null)
       setPreview(prev)
+
+      // 세션 매치 목록 조회
+      const matches = await getSessionMatches(id).catch(() => [] as SessionMatch[])
+      setSessionMatches(matches)
     } catch {
       setError('내전 정보를 불러오지 못했습니다.')
     } finally {
@@ -1034,6 +1043,42 @@ export default function SessionDetailPage() {
               confirmLoading={confirmLoading}
             />}
           </div>
+        )}
+
+        {/* 세션 매치 목록 */}
+        {sessionMatches.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">생성된 매치</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {sessionMatches.map((m) => (
+                  <div key={m.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div className="space-y-1">
+                      <span className="text-sm font-medium">{m.title}</span>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Badge variant={m.status === 'completed' ? 'secondary' : 'outline'} className="text-xs">
+                          {m.status === 'completed' ? '완료' : m.status === 'in_progress' ? '진행 중' : m.status}
+                        </Badge>
+                        {m.map_name && <span>{m.map_name}</span>}
+                        {m.result && (
+                          <span className="font-medium">
+                            {m.result === 'team_a' ? 'A팀 승리' : m.result === 'team_b' ? 'B팀 승리' : '무승부'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Link to={`/matches/${m.id}`}>
+                      <Button size="sm" variant={m.status === 'completed' ? 'outline' : 'default'}>
+                        {m.status === 'completed' ? '결과 보기' : '결과 입력'}
+                      </Button>
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
 

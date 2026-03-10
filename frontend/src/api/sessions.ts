@@ -110,7 +110,23 @@ export async function getMatchmakingPreview(sessionId: string): Promise<Matchmak
   return res.data
 }
 
-export async function confirmMatchmaking(sessionId: string): Promise<{ message: string; matches_created: number }> {
+export async function confirmMatchmaking(sessionId: string): Promise<{ message: string; matches_created: number; match_ids: string[] }> {
   const res = await apiClient.post(`/sessions/${sessionId}/matchmake/confirm`)
+  return res.data
+}
+
+export interface SessionMatch {
+  id: string
+  title: string
+  status: string
+  map_name: string | null
+  result: string | null
+  team_a_score: number | null
+  team_b_score: number | null
+  scheduled_at: string | null
+}
+
+export async function getSessionMatches(sessionId: string): Promise<SessionMatch[]> {
+  const res = await apiClient.get(`/sessions/${sessionId}/matches`)
   return res.data
 }

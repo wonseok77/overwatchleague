@@ -6,10 +6,11 @@ import { EmptyState } from '@/components/EmptyState'
 import { Select } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
-import { useAuth } from '@/contexts/AuthContext'
+import { useCommunityId } from '@/hooks/useCommunityId'
 import { getSeasons } from '@/api/seasons'
 import { getLeaderboard, type LeaderboardEntry } from '@/api/leaderboard'
 import { getHeroes, type Hero } from '@/api/heroes'
+import { HeroPortrait } from '@/components/HeroPortrait'
 import type { Season, MainRole } from '@/types'
 import { RankBadge as TierBadge } from '@/components/RankBadge'
 import { Trophy } from 'lucide-react'
@@ -39,30 +40,8 @@ function RankNumber({ rank }: { rank: number }) {
   return <span className="text-sm font-medium text-muted-foreground">{rank}</span>
 }
 
-function HeroPortrait({ hero, heroMap }: { hero: string; heroMap: Map<string, Hero> }) {
-  const heroData = heroMap.get(hero)
-  if (!heroData?.portrait_url) {
-    return (
-      <span
-        className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[8px] font-medium text-muted-foreground"
-        title={hero}
-      >
-        {hero.slice(0, 2)}
-      </span>
-    )
-  }
-  return (
-    <img
-      src={heroData.portrait_url}
-      alt={hero}
-      title={hero}
-      className="h-6 w-6 rounded-full object-cover border border-border"
-    />
-  )
-}
-
 export default function LeaderboardPage() {
-  const { user } = useAuth()
+  const communityId = useCommunityId()
   const [seasons, setSeasons] = useState<Season[]>([])
   const [selectedSeason, setSelectedSeason] = useState('')
   const [players, setPlayers] = useState<LeaderboardEntry[]>([])
@@ -71,11 +50,11 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!user) return
+    if (!communityId) return
     const load = async () => {
       try {
         const [s, heroes] = await Promise.all([
-          getSeasons(user.community_id),
+          getSeasons(communityId),
           getHeroes(),
         ])
         setSeasons(s)
@@ -89,15 +68,15 @@ export default function LeaderboardPage() {
       }
     }
     load()
-  }, [user])
+  }, [communityId])
 
   useEffect(() => {
-    if (!user) return
+    if (!communityId) return
     const load = async () => {
       setLoading(true)
       try {
         const lb = await getLeaderboard(
-          user.community_id,
+          communityId,
           selectedSeason || undefined,
         )
         setPlayers(lb)
@@ -108,7 +87,7 @@ export default function LeaderboardPage() {
       }
     }
     load()
-  }, [user, selectedSeason])
+  }, [communityId, selectedSeason])
 
   // 포지션 탭 선택 시: 해당 포지션 rank가 있는 사람 필터 + 해당 포지션 MMR 기준 정렬
   const getPositionMmr = (p: LeaderboardEntry, position: string): number | null => {
@@ -217,7 +196,7 @@ export default function LeaderboardPage() {
                             return displayHeroes.length > 0 ? (
                               <div className="flex items-center gap-1">
                                 {displayHeroes.map((hero) => (
-                                  <HeroPortrait key={hero} hero={hero} heroMap={heroMap} />
+                                  <HeroPortrait key={hero} hero={hero} heroMap={heroMap} size="h-6 w-6" />
                                 ))}
                               </div>
                             ) : (

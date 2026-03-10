@@ -7,6 +7,7 @@ import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { HighlightCard } from '@/components/HighlightCard'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCommunityId } from '@/hooks/useCommunityId'
 import { getCommunityHighlights, createHighlight, deleteHighlight, getMatches } from '@/api/matches'
 import { getMembers } from '@/api/members'
 import { getSeasons } from '@/api/seasons'
@@ -16,7 +17,8 @@ import type { MemberResponse } from '@/api/members'
 import { Plus, Film } from 'lucide-react'
 
 export default function HighlightsPage() {
-  const { user, isAdmin } = useAuth()
+  const { isAdmin } = useAuth()
+  const communityId = useCommunityId()
   const [highlights, setHighlights] = useState<Highlight[]>([])
   const [members, setMembers] = useState<MemberResponse[]>([])
   const [completedMatches, setCompletedMatches] = useState<Match[]>([])
@@ -26,18 +28,18 @@ export default function HighlightsPage() {
   const [form, setForm] = useState({ matchId: '', title: '', youtube_url: '', user_id: '' })
 
   useEffect(() => {
-    if (!user) return
+    if (!communityId) return
     setLoading(true)
 
-    const loadHighlights = getCommunityHighlights(user.community_id, { limit: 100 })
+    const loadHighlights = getCommunityHighlights(communityId, { limit: 100 })
       .then(setHighlights)
       .catch(() => {})
 
-    const loadMembers = getMembers(user.community_id)
+    const loadMembers = getMembers(communityId)
       .then(setMembers)
       .catch(() => {})
 
-    const loadMatches = getSeasons(user.community_id)
+    const loadMatches = getSeasons(communityId)
       .then(async (seasons) => {
         const allMatches: Match[] = []
         for (const season of seasons) {
@@ -49,7 +51,7 @@ export default function HighlightsPage() {
       .catch(() => {})
 
     Promise.all([loadHighlights, loadMembers, loadMatches]).finally(() => setLoading(false))
-  }, [user])
+  }, [communityId])
 
   const handleAdd = async () => {
     if (!form.matchId || !form.title || !form.youtube_url) return
@@ -59,8 +61,8 @@ export default function HighlightsPage() {
         youtube_url: form.youtube_url,
         user_id: form.user_id || undefined,
       })
-      if (user) {
-        const updated = await getCommunityHighlights(user.community_id, { limit: 100 })
+      if (communityId) {
+        const updated = await getCommunityHighlights(communityId, { limit: 100 })
         setHighlights(updated)
       }
       setShowDialog(false)

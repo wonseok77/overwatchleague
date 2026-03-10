@@ -4,7 +4,7 @@ import { Progress } from './ui/progress'
 import { Calendar, Clock, Users } from 'lucide-react'
 import { format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import type { MatchStatus } from '../types'
+import type { MatchStatus, MatchResult } from '../types'
 
 const statusConfig: Record<MatchStatus, { label: string; className: string }> = {
   open: { label: '모집중', className: 'bg-green-500 text-white border-transparent' },
@@ -13,12 +13,22 @@ const statusConfig: Record<MatchStatus, { label: string; className: string }> = 
   completed: { label: '완료', className: 'bg-ow-blue-500 text-white border-transparent' },
 }
 
+const resultLabel: Record<MatchResult, { text: string; className: string }> = {
+  team_a: { text: 'A팀 승리', className: 'text-blue-600' },
+  team_b: { text: 'B팀 승리', className: 'text-red-600' },
+  draw: { text: '무승부', className: 'text-gray-500' },
+}
+
 interface MatchCardProps {
   title: string
   scheduledAt: string
   status: MatchStatus
   currentParticipants: number
   maxParticipants?: number
+  result?: MatchResult | null
+  teamAScore?: number | null
+  teamBScore?: number | null
+  mapName?: string | null
   className?: string
   onClick?: () => void
 }
@@ -29,11 +39,16 @@ export function MatchCard({
   status,
   currentParticipants,
   maxParticipants = 10,
+  result,
+  teamAScore,
+  teamBScore,
+  mapName,
   className,
   onClick,
 }: MatchCardProps) {
   const date = new Date(scheduledAt)
   const statusInfo = statusConfig[status]
+  const isCompleted = status === 'completed'
 
   return (
     <Card className={className} onClick={onClick} role={onClick ? 'button' : undefined}>
@@ -54,18 +69,30 @@ export function MatchCard({
             {format(date, 'HH:mm')}
           </span>
         </div>
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <Users className="h-4 w-4" />
-              참가 인원
-            </span>
-            <span className="font-medium">
-              {currentParticipants}/{maxParticipants}
+        {isCompleted && result ? (
+          <div className="flex items-center gap-3 text-sm">
+            {mapName && <span className="text-muted-foreground">{mapName}</span>}
+            {teamAScore != null && teamBScore != null && (
+              <span className="font-semibold">A팀 {teamAScore} : {teamBScore} B팀</span>
+            )}
+            <span className={`font-semibold ${resultLabel[result].className}`}>
+              {resultLabel[result].text}
             </span>
           </div>
-          <Progress value={currentParticipants} max={maxParticipants} />
-        </div>
+        ) : (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-sm">
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <Users className="h-4 w-4" />
+                참가 인원
+              </span>
+              <span className="font-medium">
+                {currentParticipants}/{maxParticipants}
+              </span>
+            </div>
+            <Progress value={currentParticipants} max={maxParticipants} />
+          </div>
+        )}
       </CardContent>
     </Card>
   )
