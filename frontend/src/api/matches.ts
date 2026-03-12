@@ -52,7 +52,6 @@ export interface MatchDetailParticipant {
   status: string
   team: string | null
   main_role: string | null
-  current_rank: string | null
   mmr: number | null
   heroes_played: string[] | null
   screenshot_path: string | null

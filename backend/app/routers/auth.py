@@ -1,11 +1,15 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.community import Community
-from app.models.user import User, PlayerProfile
+from app.models.season import Season
+from app.models.user import User, PlayerProfile, PlayerPositionRank
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse, UserResponse
 from app.services.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.services.mmr import rank_to_mmr
 
 router = APIRouter()
 
@@ -34,10 +38,26 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
         profile = PlayerProfile(
             user_id=user.id,
             main_role=req.main_role,
-            current_rank=req.current_rank,
             main_heroes=req.main_heroes if req.main_heroes else None,
         )
         db.add(profile)
+
+    # 포지션 랭크 저장
+    if req.position_ranks:
+        active_season = db.query(Season).filter(
+            Season.community_id == community.id, Season.status == "active"
+        ).first()
+        for pr in req.position_ranks:
+            mmr = rank_to_mmr(pr.rank)
+            new_rank = PlayerPositionRank(
+                id=uuid.uuid4(),
+                user_id=user.id,
+                season_id=active_season.id if active_season else None,
+                position=pr.position,
+                rank=pr.rank,
+                mmr=mmr,
+            )
+            db.add(new_rank)
 
     db.commit()
     db.refresh(user)

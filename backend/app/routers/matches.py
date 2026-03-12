@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -83,10 +86,10 @@ def get_match_detail(match_id: uuid.UUID, db: Session = Depends(get_db)):
 
     def _resolve_position_mmr(
         user_id: uuid.UUID,
-        assigned_position: str | None,
+        assigned_position: Optional[str],
         season_id: uuid.UUID,
-        profile: PlayerProfile | None,
-    ) -> int | None:
+        profile: Optional[PlayerProfile],
+    ) -> Optional[int]:
         """배정 포지션의 MMR 반환. fallback: profile.mmr"""
         if not assigned_position:
             return profile.mmr if profile else None
@@ -108,9 +111,9 @@ def get_match_detail(match_id: uuid.UUID, db: Session = Depends(get_db)):
 
     def _resolve_position_rank(
         user_id: uuid.UUID,
-        assigned_position: str | None,
+        assigned_position: Optional[str],
         season_id: uuid.UUID,
-    ) -> str | None:
+    ) -> Optional[str]:
         """배정 포지션의 랭크 반환 (예: Diamond 3)"""
         if not assigned_position:
             return None
@@ -128,46 +131,50 @@ def get_match_detail(match_id: uuid.UUID, db: Session = Depends(get_db)):
         ).first()
         return pos_rank.rank if pos_rank and pos_rank.rank else None
 
-    participants_data = []
-    for p in match.participants:
-        user = db.query(User).filter(User.id == p.user_id).first()
-        profile = db.query(PlayerProfile).filter(PlayerProfile.user_id == p.user_id).first()
-        stat = next((s for s in match.stats if s.user_id == p.user_id), None)
-        participants_data.append({
-            "id": str(p.id),
-            "user_id": str(p.user_id),
-            "nickname": user.nickname if user else "",
-            "status": p.status,
-            "team": p.team,
-            "main_role": profile.main_role if profile else None,
-            "current_rank": profile.current_rank if profile else None,
-            "mmr": _resolve_position_mmr(p.user_id, p.assigned_position, match.season_id, profile),
-            "assigned_position": p.assigned_position,
-            "position_rank": _resolve_position_rank(p.user_id, p.assigned_position, match.season_id),
-            "heroes_played": stat.heroes_played if stat else None,
-            "screenshot_path": stat.screenshot_path if stat else None,
-            "mmr_before": stat.mmr_before if stat else None,
-            "mmr_after": stat.mmr_after if stat else None,
-            "mmr_change": stat.mmr_change if stat else None,
-            "kills": stat.kills if stat else None,
-            "assists": stat.assists if stat else None,
-            "deaths": stat.deaths if stat else None,
-            "damage_dealt": stat.damage_dealt if stat else None,
-            "healing_done": stat.healing_done if stat else None,
-            "damage_mitigated": stat.damage_mitigated if stat else None,
-            "stat_source": stat.stat_source if stat else None,
-        })
+    try:
+        participants_data = []
+        for p in match.participants:
+            user = db.query(User).filter(User.id == p.user_id).first()
+            profile = db.query(PlayerProfile).filter(PlayerProfile.user_id == p.user_id).first()
+            stat = next((s for s in match.stats if s.user_id == p.user_id), None)
+            participants_data.append({
+                "id": str(p.id),
+                "user_id": str(p.user_id),
+                "nickname": user.nickname if user else "",
+                "status": p.status,
+                "team": p.team,
+                "main_role": profile.main_role if profile else None,
+                "current_rank": profile.current_rank if profile else None,
+                "mmr": _resolve_position_mmr(p.user_id, p.assigned_position, match.season_id, profile),
+                "assigned_position": p.assigned_position,
+                "position_rank": _resolve_position_rank(p.user_id, p.assigned_position, match.season_id),
+                "heroes_played": stat.heroes_played if stat else None,
+                "screenshot_path": stat.screenshot_path if stat else None,
+                "mmr_before": stat.mmr_before if stat else None,
+                "mmr_after": stat.mmr_after if stat else None,
+                "mmr_change": stat.mmr_change if stat else None,
+                "kills": stat.kills if stat else None,
+                "assists": stat.assists if stat else None,
+                "deaths": stat.deaths if stat else None,
+                "damage_dealt": stat.damage_dealt if stat else None,
+                "healing_done": stat.healing_done if stat else None,
+                "damage_mitigated": getattr(stat, 'damage_mitigated', None) if stat else None,
+                "stat_source": stat.stat_source if stat else None,
+            })
 
-    highlights_data = [
-        {
-            "id": str(h.id),
-            "title": h.title,
-            "youtube_url": h.youtube_url,
-            "user_id": str(h.user_id) if h.user_id else None,
-            "registered_at": h.registered_at.isoformat(),
-        }
-        for h in match.highlights
-    ]
+        highlights_data = [
+            {
+                "id": str(h.id),
+                "title": h.title,
+                "youtube_url": h.youtube_url,
+                "user_id": str(h.user_id) if h.user_id else None,
+                "registered_at": h.registered_at.isoformat() if h.registered_at else None,
+            }
+            for h in match.highlights
+        ]
+    except Exception:
+        logger.exception("get_match_detail failed for match_id=%s", match_id)
+        raise HTTPException(status_code=500, detail="Failed to load match details")
 
     return {
         **_match_response(match).model_dump(),

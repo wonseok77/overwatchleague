@@ -72,7 +72,6 @@ class SessionRegistrationResponse(BaseModel):
     status: str
     registered_at: Optional[str] = None
     nickname: Optional[str] = None
-    current_rank: Optional[str] = None
     position_ranks: List[PositionRankInfo] = []
 
     class Config:

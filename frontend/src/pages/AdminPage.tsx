@@ -634,15 +634,6 @@ function MembersTab() {
     }
   }
 
-  const handleRankChange = async (userId: string, current_rank: string) => {
-    try {
-      const updated = await updateAdminMember(userId, { current_rank })
-      setMembers((prev) => prev.map((m) => (m.user_id === userId ? updated : m)))
-    } catch {
-      alert('랭크 변경 실패')
-    }
-  }
-
   const openMMRDialog = (m: AdminMemberResponse) => {
     const mmr: Record<PositionKey, string> = { tank: '', dps: '', support: '' }
     const rank: Record<PositionKey, string> = { tank: '', dps: '', support: '' }
@@ -735,7 +726,6 @@ function MembersTab() {
                 <th className="px-4 py-3 font-medium">멤버</th>
                 <th className="px-4 py-3 font-medium">역할</th>
                 <th className="px-4 py-3 font-medium">포지션 랭크</th>
-                <th className="px-4 py-3 font-medium text-right">랭크 변경</th>
               </tr>
             </thead>
             <tbody>
@@ -833,19 +823,6 @@ function MembersTab() {
                         랭크 수정
                       </Button>
                     </div>
-                  </td>
-                  {/* 랭크 변경 */}
-                  <td className="px-4 py-3 text-right">
-                    <Select
-                      className="h-8 w-40"
-                      value={m.current_rank ?? ''}
-                      onChange={(e) => handleRankChange(m.user_id, e.target.value)}
-                    >
-                      <option value="">미설정</option>
-                      {RANKS.map((r) => (
-                        <option key={r} value={r}>{r}</option>
-                      ))}
-                    </Select>
                   </td>
                 </tr>
               ))}

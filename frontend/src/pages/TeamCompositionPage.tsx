@@ -59,11 +59,11 @@ export default function TeamCompositionPage() {
         const memberMap = new Map(members.map((m) => [m.id, m]))
 
         const teamA: TeamMember[] = result.team_a.map((p) => ({
-          ...(memberMap.get(p.user_id) ?? { id: p.user_id, real_name: '', nickname: p.user_id, email: '', role: 'member', main_role: null, current_rank: null, current_sr: null, main_heroes: null, mmr: null }),
+          ...(memberMap.get(p.user_id) ?? { id: p.user_id, real_name: '', nickname: p.user_id, email: '', role: 'member', main_role: null, current_sr: null, main_heroes: null, mmr: null }),
           team: 'A' as const,
         }))
         const teamB: TeamMember[] = result.team_b.map((p) => ({
-          ...(memberMap.get(p.user_id) ?? { id: p.user_id, real_name: '', nickname: p.user_id, email: '', role: 'member', main_role: null, current_rank: null, current_sr: null, main_heroes: null, mmr: null }),
+          ...(memberMap.get(p.user_id) ?? { id: p.user_id, real_name: '', nickname: p.user_id, email: '', role: 'member', main_role: null, current_sr: null, main_heroes: null, mmr: null }),
           team: 'B' as const,
         }))
 

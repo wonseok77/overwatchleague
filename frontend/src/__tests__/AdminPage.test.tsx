@@ -122,7 +122,6 @@ describe('AdminPage', () => {
           role: 'member',
           avatar_url: null,
           main_role: 'dps',
-          current_rank: 'Gold 3',
           mmr: 1000,
           position_ranks: [
             { position: 'dps', rank: 'Gold 3', mmr: 1000 },

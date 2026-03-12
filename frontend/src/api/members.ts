@@ -11,7 +11,6 @@ export interface ProfileResponse {
   }
   player_profile: {
     main_role: MainRole
-    current_rank: string | null
     mmr: number
     main_heroes: string[] | null
   } | null
@@ -43,6 +42,20 @@ export interface ProfileResponse {
     avg_healing_done: number
     avg_damage_mitigated: number
   } | null
+  hero_stats: {
+    hero_name: string
+    matches: number
+    wins: number
+    losses: number
+    win_rate: number
+    avg_kills: number
+    avg_deaths: number
+    avg_assists: number
+    avg_damage_dealt: number
+    avg_healing_done: number
+    avg_damage_mitigated: number
+    kd_ratio: number
+  }[]
   season_stats: {
     season_id: string
     season_name: string
@@ -66,7 +79,6 @@ export interface MemberResponse {
   email: string
   role: string
   main_role: string | null
-  current_rank: string | null
   current_sr: number | null
   main_heroes: string[] | null
   mmr: number | null
@@ -84,7 +96,6 @@ export async function createMember(communityId: string, data: {
   email: string
   password: string
   main_role?: string
-  current_rank?: string
   main_heroes?: string[]
 }): Promise<MemberResponse> {
   const res = await apiClient.post(`/communities/${communityId}/members`, data)
@@ -101,7 +112,6 @@ export async function updateProfile(userId: string, data: ProfileUpdatePayload):
   nickname?: string
   main_role: string
   main_heroes: string[]
-  current_rank: string | null
   mmr: number
 }> {
   const res = await apiClient.patch(`/users/${userId}/profile`, data)

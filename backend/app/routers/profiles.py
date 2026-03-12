@@ -1,5 +1,6 @@
 import os
 import uuid
+from collections import defaultdict
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
@@ -31,7 +32,6 @@ class UserInfo(BaseModel):
 
 class PlayerProfileInfo(BaseModel):
     main_role: str
-    current_rank: Optional[str] = None
     mmr: int
     main_heroes: Optional[List[str]] = None
 
@@ -77,11 +77,27 @@ class CombatStatsInfo(BaseModel):
     avg_damage_mitigated: float
 
 
+class HeroStatInfo(BaseModel):
+    hero_name: str
+    matches: int
+    wins: int
+    losses: int
+    win_rate: float
+    avg_kills: float
+    avg_deaths: float
+    avg_assists: float
+    avg_damage_dealt: float
+    avg_healing_done: float
+    avg_damage_mitigated: float
+    kd_ratio: float
+
+
 class ProfileResponse(BaseModel):
     user: UserInfo
     player_profile: Optional[PlayerProfileInfo] = None
     stats: StatsInfo
     combat_stats: Optional[CombatStatsInfo] = None
+    hero_stats: List[HeroStatInfo]
     recent_matches: List[RecentMatchInfo]
     season_stats: List[SeasonStatInfo]
 
@@ -156,6 +172,56 @@ def get_user_profile(user_id: uuid.UUID, db: Session = Depends(get_db)):
             avg_damage_mitigated=round(total_mitigated / max(1, mitigated_games)),
         )
 
+    # Hero stats aggregation
+    hero_agg: dict = defaultdict(lambda: {
+        "matches": 0, "wins": 0, "losses": 0,
+        "kills": 0, "deaths": 0, "assists": 0,
+        "damage": 0, "healing": 0, "mitigated": 0,
+    })
+    for _stat, team, result in stats_rows:
+        if not _stat.heroes_played:
+            continue
+        is_win = (team == "A" and result == "team_a") or (team == "B" and result == "team_b")
+        for hero in _stat.heroes_played[:1]:
+            h = hero_agg[hero]
+            h["matches"] += 1
+            if result != "draw":
+                if is_win:
+                    h["wins"] += 1
+                else:
+                    h["losses"] += 1
+            if _stat.kills is not None:
+                h["kills"] += _stat.kills
+            if _stat.deaths is not None:
+                h["deaths"] += _stat.deaths
+            if _stat.assists is not None:
+                h["assists"] += _stat.assists
+            if _stat.damage_dealt is not None:
+                h["damage"] += _stat.damage_dealt
+            if _stat.healing_done is not None:
+                h["healing"] += _stat.healing_done
+            if _stat.damage_mitigated is not None:
+                h["mitigated"] += _stat.damage_mitigated
+
+    hero_stats = []
+    for hero_name, h in hero_agg.items():
+        m = h["matches"]
+        hero_stats.append(HeroStatInfo(
+            hero_name=hero_name,
+            matches=m,
+            wins=h["wins"],
+            losses=h["losses"],
+            win_rate=round(h["wins"] / max(1, h["wins"] + h["losses"]) * 100, 1),
+            avg_kills=round(h["kills"] / m, 1),
+            avg_deaths=round(h["deaths"] / m, 1),
+            avg_assists=round(h["assists"] / m, 1),
+            avg_damage_dealt=round(h["damage"] / m),
+            avg_healing_done=round(h["healing"] / m),
+            avg_damage_mitigated=round(h["mitigated"] / m),
+            kd_ratio=round(h["kills"] / max(1, h["deaths"]), 2),
+        ))
+    hero_stats.sort(key=lambda x: x.matches, reverse=True)
+
     # Recent 20 matches
     recent_rows = (
         db.query(PlayerMatchStat, MatchParticipant.team, Match)
@@ -220,7 +286,6 @@ def get_user_profile(user_id: uuid.UUID, db: Session = Depends(get_db)):
         ),
         player_profile=PlayerProfileInfo(
             main_role=profile.main_role,
-            current_rank=profile.current_rank,
             mmr=profile.mmr,
             main_heroes=profile.main_heroes,
         )
@@ -233,6 +298,7 @@ def get_user_profile(user_id: uuid.UUID, db: Session = Depends(get_db)):
             win_rate=win_rate,
         ),
         combat_stats=combat_stats,
+        hero_stats=hero_stats,
         recent_matches=recent_matches,
         season_stats=season_stats,
     )
@@ -248,7 +314,6 @@ class ProfileUpdateResponse(BaseModel):
     nickname: Optional[str] = None
     main_role: Optional[str] = None
     main_heroes: Optional[List[str]] = None
-    current_rank: Optional[str] = None
     mmr: Optional[int] = None
 
 
@@ -292,7 +357,6 @@ def update_user_profile(
         nickname=user.nickname,
         main_role=profile.main_role,
         main_heroes=profile.main_heroes,
-        current_rank=profile.current_rank,
         mmr=profile.mmr,
     )
 

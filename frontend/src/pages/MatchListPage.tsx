@@ -273,6 +273,7 @@ export default function MatchListPage() {
   const [matchHistoryOpen, setMatchHistoryOpen] = useState(false)
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null)
   const [matchDetails, setMatchDetails] = useState<Record<string, MatchDetail>>({})
+  const [failedMatchIds, setFailedMatchIds] = useState<Set<string>>(new Set())
 
   // 시즌 목록 상태
   const [allSeasons, setAllSeasons] = useState<Season[]>([])
@@ -387,6 +388,17 @@ export default function MatchListPage() {
     } catch { /* ignore */ }
   }
 
+  const fetchMatchDetail = async (matchId: string) => {
+    setFailedMatchIds(prev => { const next = new Set(prev); next.delete(matchId); return next })
+    try {
+      const detail = await getMatch(matchId)
+      setMatchDetails(prev => ({ ...prev, [matchId]: detail }))
+    } catch (err) {
+      console.error(`[getMatch] matchId=${matchId} 실패:`, err)
+      setFailedMatchIds(prev => new Set(prev).add(matchId))
+    }
+  }
+
   const handleToggleStats = async (e: React.MouseEvent, matchId: string) => {
     e.stopPropagation()
     if (expandedMatchId === matchId) {
@@ -394,11 +406,8 @@ export default function MatchListPage() {
       return
     }
     setExpandedMatchId(matchId)
-    if (!matchDetails[matchId]) {
-      try {
-        const detail = await getMatch(matchId)
-        setMatchDetails(prev => ({ ...prev, [matchId]: detail }))
-      } catch { /* ignore */ }
+    if (!matchDetails[matchId] && !failedMatchIds.has(matchId)) {
+      fetchMatchDetail(matchId)
     }
   }
 
@@ -612,7 +621,19 @@ export default function MatchListPage() {
                           스탯 보기
                         </button>
                       )}
-                      {isExpanded && detail && detail.participants.some(p => p.kills != null || p.damage_dealt != null) && (
+                      {isExpanded && !detail && !failedMatchIds.has(m.id) && (
+                        <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground text-center">
+                          불러오는 중...
+                        </div>
+                      )}
+                      {isExpanded && failedMatchIds.has(m.id) && (
+                        <div className="rounded-md border border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30 p-3 text-xs text-center space-y-2">
+                          <p className="text-red-600 dark:text-red-400">스탯을 불러오지 못했습니다.</p>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); fetchMatchDetail(m.id) }}
+                            className="text-xs text-ow-orange-500 hover:underline">다시 시도</button>
+                        </div>
+                      )}
+                      {isExpanded && detail && detail.participants.length > 0 && (
                         <div className="rounded-md border bg-muted/30 p-3">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {(['A', 'B'] as const).map(team => {
@@ -625,13 +646,13 @@ export default function MatchListPage() {
                                   <table className="w-full text-base">
                                     <thead>
                                       <tr className="border-b">
-                                        <th className="text-left py-2.5 px-3 font-medium">닉네임</th>
-                                        <th className="text-center py-2.5 px-3 font-medium">처치</th>
-                                        <th className="text-center py-2.5 px-3 font-medium">도움</th>
-                                        <th className="text-center py-2.5 px-3 font-medium">죽음</th>
-                                        <th className="text-center py-2.5 px-3 font-medium">피해</th>
-                                        <th className="text-center py-2.5 px-3 font-medium">치유</th>
-                                        <th className="text-center py-2.5 px-3 font-medium">경감</th>
+                                        <th className="text-left py-2.5 px-3 font-medium whitespace-nowrap">닉네임</th>
+                                        <th className="text-center py-2.5 px-3 font-medium whitespace-nowrap">처치</th>
+                                        <th className="text-center py-2.5 px-3 font-medium whitespace-nowrap">도움</th>
+                                        <th className="text-center py-2.5 px-3 font-medium whitespace-nowrap">죽음</th>
+                                        <th className="text-center py-2.5 px-3 font-medium whitespace-nowrap">피해</th>
+                                        <th className="text-center py-2.5 px-3 font-medium whitespace-nowrap">치유</th>
+                                        <th className="text-center py-2.5 px-3 font-medium whitespace-nowrap">경감</th>
                                       </tr>
                                     </thead>
                                     <tbody>
@@ -639,10 +660,14 @@ export default function MatchListPage() {
                                         <tr key={p.user_id} className="border-b last:border-0">
                                           <td className="py-2.5 px-3 font-medium whitespace-nowrap">
                                             <div className="flex items-center gap-2">
-                                              <span>{p.nickname}</span>
-                                              {p.heroes_played?.map((h) => (
-                                                <HeroPortrait key={h} hero={h} heroMap={heroMap} size="h-7 w-7" />
-                                              ))}
+                                              <span className="w-20 truncate">{p.nickname}</span>
+                                              {p.heroes_played && p.heroes_played.length > 0 && (
+                                                <div className="flex gap-0.5">
+                                                  {p.heroes_played.map((h) => (
+                                                    <HeroPortrait key={h} hero={h} heroMap={heroMap} size="h-7 w-7" />
+                                                  ))}
+                                                </div>
+                                              )}
                                             </div>
                                           </td>
                                           <td className="text-center py-2.5 px-3">{p.kills ?? '-'}</td>
@@ -662,7 +687,7 @@ export default function MatchListPage() {
                           </div>
                         </div>
                       )}
-                      {isExpanded && detail && !detail.participants.some(p => p.kills != null || p.damage_dealt != null) && (
+                      {isExpanded && detail && detail.participants.length === 0 && (
                         <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground text-center">
                           스탯 데이터가 없습니다.
                         </div>

@@ -90,13 +90,26 @@ export default function HighlightsPage() {
     ? highlights.filter((h) => h.user_id === filterPlayer)
     : highlights
 
-  const highlightData: HighlightData[] = filtered.map((h) => ({
+  // 매치별 그룹핑
+  const groupedByMatch = filtered.reduce<Record<string, { matchTitle: string; items: Highlight[] }>>((acc, h) => {
+    const key = h.match_id
+    if (!acc[key]) {
+      acc[key] = { matchTitle: h.match_title || '매치 정보 없음', items: [] }
+    }
+    acc[key].items.push(h)
+    return acc
+  }, {})
+
+  const matchGroups = Object.entries(groupedByMatch)
+
+  const toHighlightData = (h: Highlight): HighlightData => ({
     id: h.id,
     title: h.title,
     youtube_url: h.youtube_url,
     user_nickname: getMemberNickname(h.user_id),
+    match_title: h.match_title ?? undefined,
     registered_at: h.registered_at,
-  }))
+  })
 
   if (loading) {
     return (
@@ -132,21 +145,28 @@ export default function HighlightsPage() {
           </div>
         </div>
 
-        {/* Grid */}
-        {highlightData.length === 0 ? (
+        {/* Grid - 매치별 그룹핑 */}
+        {filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
             <Film className="h-12 w-12" />
             <p>아직 하이라이트가 없습니다.</p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {highlightData.map((h) => (
-              <HighlightCard
-                key={h.id}
-                highlight={h}
-                isAdmin={isAdmin}
-                onDelete={handleDelete}
-              />
+          <div className="space-y-8">
+            {matchGroups.map(([matchId, group]) => (
+              <div key={matchId}>
+                <h2 className="mb-3 text-lg font-semibold text-foreground">{group.matchTitle}</h2>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {group.items.map((h) => (
+                    <HighlightCard
+                      key={h.id}
+                      highlight={toHighlightData(h)}
+                      isAdmin={isAdmin}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

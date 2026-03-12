@@ -42,7 +42,6 @@ export interface AdminMemberResponse {
   role: 'admin' | 'manager' | 'member'
   avatar_url: string | null
   main_role: 'tank' | 'dps' | 'support' | null
-  current_rank: string | null
   mmr: number | null
   position_ranks: PositionRankInfo[]
   is_hidden: boolean
@@ -50,7 +49,6 @@ export interface AdminMemberResponse {
 
 export interface AdminMemberUpdate {
   role?: 'admin' | 'manager' | 'member'
-  current_rank?: string
   nickname?: string
   real_name?: string
   main_role?: 'tank' | 'dps' | 'support' | null

@@ -71,7 +71,7 @@ export function MatchResultForm({
   const [result, setResult] = useState<MatchResult | ''>('')
   const [heroInputs, setHeroInputs] = useState<Record<string, string[]>>(() => {
     const init: Record<string, string[]> = {}
-    participants.forEach((p) => { init[p.user_id] = ['', '', ''] })
+    participants.forEach((p) => { init[p.user_id] = [''] })
     return init
   })
   const [screenshot, setScreenshot] = useState<File | null>(null)
@@ -127,7 +127,7 @@ export function MatchResultForm({
 
   const handleHeroChange = (userId: string, index: number, value: string) => {
     setHeroInputs((prev) => {
-      const heroes = [...(prev[userId] || ['', '', ''])]
+      const heroes = [...(prev[userId] || [''])]
       heroes[index] = value
       return { ...prev, [userId]: heroes }
     })
@@ -177,16 +177,13 @@ export function MatchResultForm({
           <span className="text-sm font-medium w-24 truncate">
             {p.nickname || p.user_id.slice(0, 8)}
           </span>
-          {[0, 1, 2].map((i) => (
-            <HeroSelect
-              key={i}
-              value={heroInputs[p.user_id]?.[i] || ''}
-              onChange={(name) => handleHeroChange(p.user_id, i, name)}
-              heroes={heroes}
-              placeholder={`영웅 ${i + 1}`}
-              className="w-44"
-            />
-          ))}
+          <HeroSelect
+            value={heroInputs[p.user_id]?.[0] || ''}
+            onChange={(name) => handleHeroChange(p.user_id, 0, name)}
+            heroes={heroes}
+            placeholder="영웅 선택"
+            className="w-44"
+          />
         </div>
       ))}
     </div>

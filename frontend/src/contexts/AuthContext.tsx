@@ -13,8 +13,8 @@ interface AuthContextType {
     nickname: string
     community_slug: string
     main_role?: string
-    current_rank?: string
     main_heroes?: string[]
+    position_ranks?: { position: string; rank: string }[]
   }) => Promise<void>
   logout: () => void
   isAdmin: boolean

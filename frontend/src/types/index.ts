@@ -31,7 +31,6 @@ export interface PlayerProfile {
   id: string
   user_id: string
   main_role: MainRole
-  current_rank: string | null
   current_sr: number | null
   main_heroes: string[]
   mmr: number
@@ -88,6 +87,7 @@ export interface Highlight {
   title: string
   youtube_url: string
   registered_at: string
+  match_title?: string | null
 }
 
 export interface SeasonStat {
@@ -135,7 +135,6 @@ export interface SessionRegistration {
   status: string
   registered_at: string | null
   nickname?: string | null
-  current_rank?: string | null
   position_ranks?: Array<{position: PositionType, rank: string, mmr: number | null}>
 }
 

@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models.match import Match, Highlight
@@ -26,6 +26,7 @@ class HighlightResponse(BaseModel):
     title: str
     youtube_url: str
     registered_at: str
+    match_title: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -39,6 +40,7 @@ def _highlight_response(h: Highlight) -> HighlightResponse:
         title=h.title,
         youtube_url=h.youtube_url,
         registered_at=h.registered_at.isoformat(),
+        match_title=h.match.title if h.match else None,
     )
 
 
@@ -52,6 +54,7 @@ def list_community_highlights(
     highlights = (
         db.query(Highlight)
         .join(Match, Highlight.match_id == Match.id)
+        .options(joinedload(Highlight.match))
         .filter(Match.community_id == community_id)
         .order_by(Highlight.registered_at.desc())
         .offset(offset)

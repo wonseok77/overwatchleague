@@ -2,6 +2,11 @@ from typing import Optional, List
 from pydantic import BaseModel, EmailStr
 
 
+class PositionRankInput(BaseModel):
+    position: str  # "tank" | "dps" | "support"
+    rank: str
+
+
 class RegisterRequest(BaseModel):
     email: str
     password: str
@@ -9,8 +14,8 @@ class RegisterRequest(BaseModel):
     nickname: str
     community_slug: str
     main_role: Optional[str] = None
-    current_rank: Optional[str] = None
     main_heroes: Optional[List[str]] = None
+    position_ranks: Optional[List[PositionRankInput]] = None
 
 
 class LoginRequest(BaseModel):

@@ -8,7 +8,6 @@ class MemberCreate(BaseModel):
     email: str
     password: str
     main_role: Optional[str] = None
-    current_rank: Optional[str] = None
     main_heroes: Optional[List[str]] = None
     role: Optional[str] = "member"
 
@@ -16,7 +15,6 @@ class MemberCreate(BaseModel):
 class MemberUpdate(BaseModel):
     nickname: Optional[str] = None
     main_role: Optional[str] = None
-    current_rank: Optional[str] = None
     current_sr: Optional[int] = None
     main_heroes: Optional[List[str]] = None
     role: Optional[str] = None
@@ -29,7 +27,6 @@ class MemberResponse(BaseModel):
     email: str
     role: str
     main_role: Optional[str] = None
-    current_rank: Optional[str] = None
     current_sr: Optional[int] = None
     main_heroes: Optional[List[str]] = None
     mmr: Optional[int] = None

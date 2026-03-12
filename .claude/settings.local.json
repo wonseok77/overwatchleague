@@ -105,7 +105,10 @@
       "Bash(docker compose logs backend --tail 5 2>&1)",
       "Bash(ls -la /Users/wonseok/Desktop/ow-league/ | grep -E \"^-.*\\\\.\\(md|env|conf|yml|yaml\\)$\")",
       "Bash(docker compose version 2>/dev/null && docker info --format '{{.ServerVersion}}' 2>/dev/null || echo \"Docker not available\")",
-      "Bash(find /Users/wonseok/Desktop/ow-league/frontend/src -name \"App.*\" -o -name \"main.*\" | grep -E \"\\\\.\\(tsx|ts\\)$\")"
+      "Bash(find /Users/wonseok/Desktop/ow-league/frontend/src -name \"App.*\" -o -name \"main.*\" | grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(ls -la /Users/wonseok/Desktop/ow-league/backend/alembic/versions/ | grep -E \"\\\\.py$\")",
+      "Bash(grep -n \"current_rank\\\\|PositionRank\" /Users/wonseok/Desktop/ow-league/frontend/src/pages/*.tsx)",
+      "Bash(find /Users/wonseok/Desktop/ow-league/backend -name \"*mmr*\" -o -name \"*rank*\" | grep -E \"\\\\.\\(py|sql\\)$\")"
     ]
   }
 }

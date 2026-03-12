@@ -970,8 +970,6 @@ export default function SessionDetailPage() {
                                     </div>
                                   ))}
                                 </div>
-                              ) : reg.current_rank ? (
-                                <RankBadge rank={reg.current_rank} />
                               ) : (
                                 <span className="text-muted-foreground text-xs">미입력</span>
                               )}
@@ -1070,8 +1068,8 @@ export default function SessionDetailPage() {
                       </div>
                     </div>
                     <Link to={`/matches/${m.id}`}>
-                      <Button size="sm" variant={m.status === 'completed' ? 'outline' : 'default'}>
-                        {m.status === 'completed' ? '결과 보기' : '결과 입력'}
+                      <Button size="sm" variant={m.status === 'completed' || !isAdminOrManager ? 'outline' : 'default'}>
+                        {m.status === 'completed' ? '결과 보기' : isAdminOrManager ? '결과 입력' : '상세 보기'}
                       </Button>
                     </Link>
                   </div>

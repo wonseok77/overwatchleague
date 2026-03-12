@@ -98,7 +98,6 @@ def _build_member_response(user: User) -> MemberResponse:
         email=user.email,
         role=user.role,
         main_role=profile.main_role if profile else None,
-        current_rank=profile.current_rank if profile else None,
         current_sr=profile.current_sr if profile else None,
         main_heroes=profile.main_heroes if profile else None,
         mmr=profile.mmr if profile else None,
@@ -140,7 +139,6 @@ def create_member(
         profile = PlayerProfile(
             user_id=user.id,
             main_role=req.main_role,
-            current_rank=req.current_rank,
             main_heroes=req.main_heroes,
         )
         db.add(profile)
@@ -175,8 +173,6 @@ def update_member(
     if profile:
         if req.main_role is not None:
             profile.main_role = req.main_role
-        if req.current_rank is not None:
-            profile.current_rank = req.current_rank
         if req.current_sr is not None:
             profile.current_sr = req.current_sr
         if req.main_heroes is not None:

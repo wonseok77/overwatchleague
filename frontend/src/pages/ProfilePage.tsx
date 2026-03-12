@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar } from '@/components/Avatar'
-import { Table, TableHeader, TableBody, TableRow, TableHead } from '@/components/ui/table'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { RoleBadge } from '@/components/RoleBadge'
 import { RankBadge } from '@/components/RankBadge'
 import { HeroBadge } from '@/components/HeroBadge'
@@ -156,7 +156,6 @@ export default function ProfilePage() {
                 ...prev.player_profile,
                 main_role: (result.main_role as typeof prev.player_profile.main_role) ?? prev.player_profile.main_role,
                 main_heroes: result.main_heroes,
-                current_rank: result.current_rank,
                 mmr: result.mmr,
               }
             : prev.player_profile,
@@ -347,10 +346,7 @@ export default function ProfilePage() {
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     {player_profile && (
-                      <>
-                        <RoleBadge role={player_profile.main_role} />
-                        {player_profile.current_rank && <RankBadge rank={player_profile.current_rank} />}
-                      </>
+                      <RoleBadge role={player_profile.main_role} />
                     )}
                   </div>
                   {player_profile?.main_heroes && player_profile.main_heroes.length > 0 ? (
@@ -564,6 +560,63 @@ export default function ProfilePage() {
                   value={profile.combat_stats.avg_damage_mitigated.toLocaleString()}
                   icon={<Shield className="h-5 w-5" />}
                 />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* 영웅별 통계 */}
+        {profile.hero_stats && profile.hero_stats.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">영웅별 통계</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="whitespace-nowrap">영웅</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">경기</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">승률</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">K/D</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">처치</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">죽음</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">도움</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">피해</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">치유</TableHead>
+                      <TableHead className="text-center whitespace-nowrap">경감</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {profile.hero_stats.map((hs) => {
+                      const heroData = heroes.find((h) => h.name === hs.hero_name)
+                      return (
+                        <TableRow key={hs.hero_name}>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              {heroData?.portrait_url ? (
+                                <img src={heroData.portrait_url} alt="" className="h-6 w-6 rounded-full object-cover" />
+                              ) : (
+                                <HeroBadge hero={hs.hero_name} />
+                              )}
+                              <span className="text-sm font-medium">{hs.hero_name}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">{hs.matches}</TableCell>
+                          <TableCell className="text-center">{hs.win_rate}%</TableCell>
+                          <TableCell className="text-center">{hs.kd_ratio.toFixed(2)}</TableCell>
+                          <TableCell className="text-center">{hs.avg_kills.toFixed(1)}</TableCell>
+                          <TableCell className="text-center">{hs.avg_deaths.toFixed(1)}</TableCell>
+                          <TableCell className="text-center">{hs.avg_assists.toFixed(1)}</TableCell>
+                          <TableCell className="text-center">{hs.avg_damage_dealt.toLocaleString()}</TableCell>
+                          <TableCell className="text-center">{hs.avg_healing_done.toLocaleString()}</TableCell>
+                          <TableCell className="text-center">{hs.avg_damage_mitigated.toLocaleString()}</TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>

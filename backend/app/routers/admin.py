@@ -68,7 +68,6 @@ class AdminMemberResponse(BaseModel):
     role: str
     avatar_url: Optional[str] = None
     main_role: Optional[str] = None
-    current_rank: Optional[str] = None
     mmr: Optional[int] = None
     position_ranks: List[PositionRankInfo] = []
     is_hidden: bool = False
@@ -79,7 +78,6 @@ class AdminMemberResponse(BaseModel):
 
 class AdminMemberUpdate(BaseModel):
     role: Optional[str] = None
-    current_rank: Optional[str] = None
     nickname: Optional[str] = None
     real_name: Optional[str] = None
     main_role: Optional[str] = None  # tank | dps | support
@@ -141,7 +139,6 @@ def _member_response(user: User, active_season_id=None) -> AdminMemberResponse:
         role=user.role,
         avatar_url=user.avatar_url,
         main_role=profile.main_role if profile else None,
-        current_rank=profile.current_rank if profile else None,
         mmr=profile.mmr if profile else None,
         position_ranks=position_ranks_data,
         is_hidden=user.is_hidden,
@@ -375,11 +372,6 @@ def update_member(
 
     if req.real_name is not None:
         user.real_name = req.real_name
-
-    if req.current_rank is not None:
-        if not user.profile:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User has no player profile")
-        user.profile.current_rank = req.current_rank
 
     if req.main_role is not None or req.main_heroes is not None:
         if not user.profile:

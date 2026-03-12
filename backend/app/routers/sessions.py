@@ -57,7 +57,6 @@ def _session_response(s: MatchSession) -> SessionResponse:
 def _registration_response(
     r: SessionRegistration,
     nickname: Optional[str] = None,
-    current_rank: Optional[str] = None,
     position_ranks: Optional[List[PositionRankInfo]] = None,
 ) -> SessionRegistrationResponse:
     return SessionRegistrationResponse(
@@ -72,7 +71,6 @@ def _registration_response(
         status=r.status,
         registered_at=r.registered_at.isoformat() if r.registered_at else None,
         nickname=nickname,
-        current_rank=current_rank,
         position_ranks=position_ranks or [],
     )
 
@@ -399,7 +397,6 @@ def list_registrations(
         results.append(_registration_response(
             r,
             nickname=user.nickname if user else None,
-            current_rank=profile.current_rank if profile else None,
             position_ranks=pos_ranks_map.get(r.user_id, []),
         ))
     return results
@@ -434,7 +431,6 @@ def update_registration(
     return _registration_response(
         reg,
         nickname=user.nickname if user else None,
-        current_rank=profile.current_rank if profile else None,
     )
 
 

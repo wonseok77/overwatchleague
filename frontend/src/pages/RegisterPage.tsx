@@ -25,7 +25,9 @@ export default function RegisterPage() {
     nickname: '',
     community_slug: 'ow-league',
     main_role: '',
-    current_rank: '',
+    tank_rank: '',
+    dps_rank: '',
+    support_rank: '',
     hero1: '',
     hero2: '',
     hero3: '',
@@ -56,6 +58,11 @@ export default function RegisterPage() {
     setError('')
     setLoading(true)
     try {
+      const position_ranks = [
+        { position: 'tank', rank: form.tank_rank },
+        { position: 'dps', rank: form.dps_rank },
+        { position: 'support', rank: form.support_rank },
+      ].filter((pr) => pr.rank)
       await register({
         email: form.email,
         password: form.password,
@@ -63,8 +70,8 @@ export default function RegisterPage() {
         nickname: form.nickname,
         community_slug: form.community_slug,
         main_role: form.main_role || undefined,
-        current_rank: form.current_rank || undefined,
         main_heroes: [form.hero1, form.hero2, form.hero3].filter(Boolean),
+        position_ranks: position_ranks.length > 0 ? position_ranks : undefined,
       })
       if (avatarFile) {
         try {
@@ -134,9 +141,29 @@ export default function RegisterPage() {
                   <option value="support">Support</option>
                 </Select>
               </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
               <div className="space-y-2">
-                <Label htmlFor="current_rank">현시즌 랭크</Label>
-                <Select id="current_rank" value={form.current_rank} onChange={(e) => update('current_rank', e.target.value)}>
+                <Label htmlFor="tank_rank">탱커 랭크</Label>
+                <Select id="tank_rank" value={form.tank_rank} onChange={(e) => update('tank_rank', e.target.value)} required>
+                  <option value="">선택</option>
+                  {RANKS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dps_rank">딜러 랭크</Label>
+                <Select id="dps_rank" value={form.dps_rank} onChange={(e) => update('dps_rank', e.target.value)} required>
+                  <option value="">선택</option>
+                  {RANKS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="support_rank">서포터 랭크</Label>
+                <Select id="support_rank" value={form.support_rank} onChange={(e) => update('support_rank', e.target.value)} required>
                   <option value="">선택</option>
                   {RANKS.map((r) => (
                     <option key={r} value={r}>{r}</option>

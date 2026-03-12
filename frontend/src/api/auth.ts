@@ -8,7 +8,8 @@ export async function register(data: {
   nickname: string
   community_slug: string
   main_role?: string
-  current_rank?: string
+  main_heroes?: string[]
+  position_ranks?: { position: string; rank: string }[]
 }): Promise<AuthResponse> {
   const res = await apiClient.post('/auth/register', data)
   return res.data

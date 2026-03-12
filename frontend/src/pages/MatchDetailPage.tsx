@@ -43,6 +43,7 @@ export default function MatchDetailPage() {
   const { isAdmin, isAdminOrManager } = useAuth()
   const [match, setMatch] = useState<MatchDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<{ status: number; message: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [showHighlightDialog, setShowHighlightDialog] = useState(false)
   const [highlightForm, setHighlightForm] = useState({ title: '', youtube_url: '', user_id: '' })
@@ -61,9 +62,19 @@ export default function MatchDetailPage() {
   useEffect(() => {
     if (!id) return
     setLoading(true)
+    setError(null)
     getMatch(id)
       .then(setMatch)
-      .catch(() => {})
+      .catch((err) => {
+        console.error(`[MatchDetailPage] getMatch(${id}) 실패:`, err)
+        const s = err?.response?.status ?? 0
+        setError({
+          status: s,
+          message: s === 404
+            ? '경기를 찾을 수 없습니다.'
+            : '경기 정보를 불러오는 데 실패했습니다.',
+        })
+      })
       .finally(() => setLoading(false))
   }, [id])
 
@@ -142,6 +153,25 @@ export default function MatchDetailPage() {
     return (
       <Layout>
         <div className="py-12 text-center text-muted-foreground">로딩 중...</div>
+      </Layout>
+    )
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="py-12 text-center space-y-4">
+          <p className="text-muted-foreground">{error.message}</p>
+          {error.status !== 404 && (
+            <Button variant="outline" size="sm" onClick={() => {
+              setError(null); setLoading(true)
+              getMatch(id!).then(setMatch).catch((err) => {
+                const s = err?.response?.status ?? 0
+                setError({ status: s, message: '경기 정보를 불러오는 데 실패했습니다.' })
+              }).finally(() => setLoading(false))
+            }}>다시 시도</Button>
+          )}
+        </div>
       </Layout>
     )
   }

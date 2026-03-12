@@ -56,7 +56,6 @@ const baseMatch: MatchDetail = {
       status: 'registered',
       team: 'A',
       main_role: 'dps',
-      current_rank: 'Gold',
       mmr: 1200,
       heroes_played: null,
       screenshot_path: null,
@@ -80,7 +79,6 @@ const baseMatch: MatchDetail = {
       status: 'registered',
       team: 'B',
       main_role: 'support',
-      current_rank: 'Platinum',
       mmr: 1400,
       heroes_played: null,
       screenshot_path: null,
@@ -129,7 +127,9 @@ describe('MatchDetailPage', () => {
 
     it('shows not found when match does not exist', async () => {
       mockedGetMe.mockRejectedValue(new Error('no auth'))
-      mockedGetMatch.mockRejectedValue(new Error('404'))
+      const err = new Error('404') as Error & { response?: { status: number } }
+      err.response = { status: 404 }
+      mockedGetMatch.mockRejectedValue(err)
       renderPage()
       await waitFor(() => {
         expect(screen.getByText('경기를 찾을 수 없습니다.')).toBeInTheDocument()
